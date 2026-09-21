@@ -1,0 +1,1638 @@
+[{
+    "inputs": [{
+        "internalType": "address",
+        "name": "_rootAddress",
+        "type": "address"
+    }],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+}, {
+    "anonymous": false,
+    "inputs": [{
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "indexed": true,
+        "internalType": "uint8",
+        "name": "incomeType",
+        "type": "uint8"
+    }, {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }, {
+        "indexed": true,
+        "internalType": "address",
+        "name": "source",
+        "type": "address"
+    }, {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "name": "IncomeWithdrawalRecorded",
+    "type": "event"
+}, {
+    "anonymous": false,
+    "inputs": [{
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+    }, {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+    }],
+    "name": "OwnershipTransferred",
+    "type": "event"
+}, {
+    "anonymous": false,
+    "inputs": [{
+        "indexed": true,
+        "internalType": "address",
+        "name": "oldContract",
+        "type": "address"
+    }, {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newContract",
+        "type": "address"
+    }],
+    "name": "PackageContractUpdated",
+    "type": "event"
+}, {
+    "anonymous": false,
+    "inputs": [{
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "usdtAmount",
+        "type": "uint256"
+    }, {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "tokenAmount",
+        "type": "uint256"
+    }],
+    "name": "StakeRecorded",
+    "type": "event"
+}, {
+    "anonymous": false,
+    "inputs": [{
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "indexed": true,
+        "internalType": "address",
+        "name": "referral",
+        "type": "address"
+    }, {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+    }, {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "name": "UserRegistered",
+    "type": "event"
+}, {
+    "anonymous": false,
+    "inputs": [{
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "usdAmount",
+        "type": "uint256"
+    }, {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "name": "WithdrawSummaryRecorded",
+    "type": "event"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "name": "addressToId",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "bp",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "principal",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "stakeTimestamp",
+        "type": "uint256"
+    }],
+    "name": "calcStakeRoiAccrued",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "accrued",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "maxAmount",
+        "type": "uint256"
+    }],
+    "name": "claimLevelRoiFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "claimable",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256[15]",
+        "name": "levelClaimed",
+        "type": "uint256[15]"
+    }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "maxAmount",
+        "type": "uint256"
+    }],
+    "name": "claimSelfRoiByStakeFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "claimedAmount",
+        "type": "uint256"
+    }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "claimSelfRoiFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "claimable",
+        "type": "uint256"
+    }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "dailyRoiBP",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "deployedAt",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "directBusinessNeedByLevel",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "name": "directBusinessUSDT",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getAchievedPowerLevelNowFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }],
+    "name": "getAllLevelRoiClaimableFor",
+    "outputs": [{
+        "internalType": "uint256[15]",
+        "name": "levelAmounts",
+        "type": "uint256[15]"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getDirectCount",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "count",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getHighestOpenLevel",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "highestLevel",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "dayTimestamp",
+        "type": "uint256"
+    }],
+    "name": "getLevelDailyRewardAt",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "reward",
+        "type": "uint256"
+    }, {
+        "internalType": "bool",
+        "name": "levelOpen",
+        "type": "bool"
+    }, {
+        "internalType": "uint256",
+        "name": "dayStart",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "dayEnd",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }],
+    "name": "getLevelRoiBP",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }],
+    "name": "getLevelRoiClaimableFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "downline",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "packageIndex",
+        "type": "uint256"
+    }],
+    "name": "getLevelRoiClaimableFromUserStake",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "claimable",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }],
+    "name": "getLevelUserAt",
+    "outputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }],
+    "name": "getLevelUsersLength",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }],
+    "name": "getPowerThresholdUSDT",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "thresholdUSDT",
+        "type": "uint256"
+    }],
+    "name": "getQualifiedBusinessForPower",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "qualified",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getRegisteredDays",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "completedDays",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "currentDay",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "registeredAt",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "rewardIndex",
+        "type": "uint256"
+    }],
+    "name": "getRewardCumulativeBusiness",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "totalNeeded",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "rewardIndex",
+        "type": "uint256"
+    }],
+    "name": "getRewardInstallmentAmount",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "rewardIndex",
+        "type": "uint256"
+    }],
+    "name": "getRewardInstallmentCount",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "rewardIndex",
+        "type": "uint256"
+    }],
+    "name": "getRewardToken",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getSelfRoiClaimableFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "claimable",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }],
+    "name": "getStakeContractDays",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "contractDaysPassed",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getStakeHistoryLength",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }],
+    "name": "getStakeRoiInfoFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "principal",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "maxRoi",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "totalAccrued",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "claimed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "claimable",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "upline",
+        "type": "address"
+    }],
+    "name": "getTotalLevelRoiClaimableFor",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "claimable",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }],
+    "name": "getUserIncomeWithdrawRecordAt",
+    "outputs": [{
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "internalType": "uint8",
+        "name": "incomeType",
+        "type": "uint8"
+    }, {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "source",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint8",
+        "name": "incomeType",
+        "type": "uint8"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }],
+    "name": "getUserIncomeWithdrawRecordAtByType",
+    "outputs": [{
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "source",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getUserIncomeWithdrawRecordsLength",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint8",
+        "name": "incomeType",
+        "type": "uint8"
+    }],
+    "name": "getUserIncomeWithdrawRecordsLengthByType",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "count",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }],
+    "name": "getUserWithdrawSummaryFlushAt",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "directFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardFlushed",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+    }],
+    "name": "getUserWithdrawSummaryRecordAt",
+    "outputs": [{
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "directAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "usdAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }],
+    "name": "getUserWithdrawSummaryRecordsLength",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "idToAddress",
+    "outputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "incomeWithdrawRecords",
+    "outputs": [{
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "internalType": "uint8",
+        "name": "incomeType",
+        "type": "uint8"
+    }, {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "source",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }],
+    "name": "isLevelOpen",
+    "outputs": [{
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "level",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "atTimestamp",
+        "type": "uint256"
+    }],
+    "name": "isLevelOpenAt",
+    "outputs": [{
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "levelRoiBPByLevel",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "levelRoiClaimedFromStake",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "levelTeamCount",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "levelTeamUsers",
+    "outputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "maxLevels",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "maxRoiBP",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "nextUserId",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "oneDay",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "packageContract",
+    "outputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "powerLegCapBP",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "powerLevels",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "powerThresholdBase",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "powerThresholdUSDTByLevel",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "usdtAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "tokenAmount",
+        "type": "uint256"
+    }],
+    "name": "recordDepositFor",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint8",
+        "name": "incomeType",
+        "type": "uint8"
+    }, {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "source",
+        "type": "address"
+    }],
+    "name": "recordIncomeWithdrawal",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "userAddr",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "directAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "directFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "usdAmount",
+        "type": "uint256"
+    }],
+    "name": "recordWithdrawSummary",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "referral",
+        "type": "address"
+    }],
+    "name": "register",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "rewardBusinessBase",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "rewardCumulativeBusinessByIndex",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "rewardInstallmentAmountByIndex",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "rewardInstallmentCountByIndex",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "rewardLevels",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "rewardTokenBase",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "rewardTokenByIndex",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "rootAddress",
+    "outputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "selfRoiClaimedByStake",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "newPackageContract",
+        "type": "address"
+    }],
+    "name": "setPackageContract",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "tokenUnit",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+    }],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+}, {
+    "inputs": [],
+    "name": "usdtDecimals",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "userIncomeWithdrawRecords",
+    "outputs": [{
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "internalType": "uint8",
+        "name": "incomeType",
+        "type": "uint8"
+    }, {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "source",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "userStakeHistory",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "usdtAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "tokenAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "userWithdrawSummaryRecords",
+    "outputs": [{
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "directAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "directFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "usdAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+    }],
+    "name": "users",
+    "outputs": [{
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+    }, {
+        "internalType": "address",
+        "name": "referral",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "registeredAt",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "totalTeam",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "totalTeamDeposit",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfDeposit",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "totalTeamStakeToken",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfStakeToken",
+        "type": "uint256"
+    }, {
+        "internalType": "bool",
+        "name": "exists",
+        "type": "bool"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}, {
+    "inputs": [{
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+    }],
+    "name": "withdrawSummaryRecords",
+    "outputs": [{
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+    }, {
+        "internalType": "uint256",
+        "name": "directAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "directFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "selfRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "levelRoiFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "powerFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "rewardFlushed",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "usdAmount",
+        "type": "uint256"
+    }, {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+    }],
+    "stateMutability": "view",
+    "type": "function"
+}]

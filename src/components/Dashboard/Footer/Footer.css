@@ -1,0 +1,92 @@
+.dashboard-footer-wrapper {
+    margin-top: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    padding: 18px 20px;
+    border-top: 1px solid rgba(46, 219, 255, 0.08);
+    background:
+        linear-gradient(180deg, rgba(14, 21, 30, 0.55), rgba(8, 12, 18, 0.35));
+    border-radius: 16px;
+}
+
+.dashboard-footer-wrapper .icon-wrapper {
+    display: flex;
+    gap: 26px;
+    flex-wrap: wrap;
+}
+
+.hexagon {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+}
+
+.hexagon-outer {
+    width: 42px;
+    height: 42px;
+    background: linear-gradient(135deg, #19f28a 0%, #00cfc8 60%, #2edbff 100%);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow:
+        0 0 18px rgba(25, 242, 138, 0.18),
+        0 10px 18px rgba(0, 0, 0, 0.16);
+}
+
+.hexagon-inner {
+    cursor: pointer;
+    width: 35px;
+    height: 35px;
+    background: linear-gradient(180deg, rgba(16, 24, 34, 0.98), rgba(9, 14, 22, 0.98));
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: transform 0.25s ease, background 0.25s ease;
+}
+
+.hexagon-inner:hover {
+    transform: scale(1.05);
+    background: linear-gradient(180deg, rgba(20, 32, 42, 0.98), rgba(10, 18, 28, 0.98));
+}
+
+.content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    color: white;
+}
+
+.hexagon .icon {
+    font-size: 15px;
+    color: #19f28a;
+}
+
+.hexagon p {
+    color: #dffef4;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+}
+
+.dashboard-footer-wrapper .copyright {
+    color: #8fa6ba;
+    font-size: 15px;
+}
+
+@media (max-width: 576px) {
+    .dashboard-footer-wrapper {
+        margin-top: 15px;
+        flex-direction: column;
+        gap: 20px;
+        text-align: center;
+    }
+
+    .dashboard-footer-wrapper .icon-wrapper {
+        justify-content: center;
+    }
+}

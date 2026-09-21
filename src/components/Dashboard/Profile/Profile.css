@@ -1,0 +1,146 @@
+.main-profile-container .heading {
+    font-size: 2rem !important;
+}
+
+.profile-tab-container {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.10), rgba(123, 183, 255, 0.05) 45%, rgba(11, 27, 45, 0.24) 100%);
+    border: 1px solid rgba(194, 225, 255, 0.20);
+    border-radius: 8px;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-around;
+    padding: 15px 35px;
+    margin-bottom: 1.5rem;
+    margin-top: 2rem;
+    overflow-x: auto;
+    box-shadow:
+        0 18px 34px rgba(7, 15, 31, 0.20),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    backdrop-filter: blur(18px);
+}
+
+
+.profile-tab-container .profile-tab {
+    border: 1px solid rgba(194, 225, 255, 0.18);
+    color: #dffff5;
+    cursor: pointer;
+    padding: 7px 20px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    width: fit-content;
+}
+
+
+.profile-tab-container .profile-tab .icon {
+    font-size: 20px;
+}
+
+.profile-tab-container .profile-tab .tab-name {
+    font-size: 12px;
+    margin-top: 0px;
+
+}
+
+.profile-tab-container .active-tab {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(46, 219, 255, 0.10));
+    color: #fff;
+}
+
+.profile-info-show {
+    border: 1px solid rgba(194, 225, 255, 0.20);
+    padding: 20px 15px;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.10), rgba(123, 183, 255, 0.05) 45%, rgba(11, 27, 45, 0.24) 100%);
+    box-shadow:
+        0 18px 34px rgba(7, 15, 31, 0.20),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    backdrop-filter: blur(18px);
+}
+
+.profile-info-show .title {
+    background: linear-gradient(90deg, rgb(82, 168, 56) 0%, rgb(28, 156, 8) 50%, rgb(53, 235, 7) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: clamp(1.5rem, 5vw, 2rem);
+    font-weight: 600;
+    border-bottom: 5px dotted #15d939;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.profile-info-show .info-container {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+    gap: 20px;
+    padding: 1rem 0.5rem;
+    box-sizing: border-box;
+}
+
+.profile-info-show .info-container .info-tab {
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(123, 183, 255, 0.04) 45%, rgba(11, 27, 45, 0.22) 100%);
+    box-shadow:
+        0 14px 26px rgba(7, 15, 31, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(194, 225, 255, 0.18);
+    padding: 20px;
+    gap: 8px;
+    border-radius: 10px;
+    position: relative;
+    backdrop-filter: blur(16px);
+}
+
+.profile-info-show .info-container .info-tab .icon {
+    position: absolute;
+    top: 28px;
+    right: 30px;
+}
+
+.profile-info-show .info-container .info-tab input::placeholder {
+    color: #969595 !important;
+}
+
+
+/* Ensures padding doesn't break width */
+/* Inputs and Selects */
+.profile-info-show .info-container .info-tab input,
+.profile-info-show .info-container .info-tab select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    color: #eef8ff;
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(194, 225, 255, 0.20);
+    outline: none;
+    font-size: 14px;
+    border-radius: 8px;
+}
+
+
+/* Tablet: 2 Columns */
+@media (min-width: 640px) {
+    .profile-info-show .info-container {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 30px;
+        padding: 2rem;
+    }
+}
+
+@media (min-width: 1024px) {
+    .profile-info-show .info-container {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 40px;
+    }
+}

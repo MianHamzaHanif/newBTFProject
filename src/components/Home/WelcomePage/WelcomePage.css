@@ -1,0 +1,366 @@
+.welcome-wrapper .crypto-bg {
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 12% 18%, rgba(124, 77, 255, 0.16), transparent 22%),
+        radial-gradient(circle at 85% 16%, rgba(46, 219, 255, 0.12), transparent 24%),
+        radial-gradient(circle at 75% 84%, rgba(25, 242, 138, 0.12), transparent 22%),
+        linear-gradient(180deg, #071018 0%, #04070d 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.welcome-wrapper .crypto-bg::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(90deg, transparent, rgba(25, 242, 138, 0.04), transparent),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 35%);
+    pointer-events: none;
+}
+
+/* ================= WAVES ================= */
+.welcome-wrapper .bg-waves {
+    position: absolute;
+    inset: 0;
+    background:
+        repeating-linear-gradient(
+            160deg,
+            transparent 0px,
+            transparent 28px,
+            rgba(25, 242, 138, 0.05) 30px
+        );
+    animation: waveMove 25s linear infinite;
+    opacity: 0.6;
+}
+
+@keyframes waveMove {
+    from {
+        background-position: 0 0;
+    }
+
+    to {
+        background-position: 800px 400px;
+    }
+}
+
+/* ================= ARROWS ================= */
+.welcome-wrapper .arrow {
+    position: absolute;
+    width: 520px;
+    height: 360px;
+    background: linear-gradient(
+        120deg,
+        transparent,
+        rgba(25, 242, 138, 0.22),
+        rgba(46, 219, 255, 0.14),
+        transparent
+    );
+    filter: blur(1px);
+}
+
+/* LEFT ARROW */
+.welcome-wrapper .arrow-left {
+    left: -120px;
+    bottom: 120px;
+    transform: rotate(-15deg);
+    clip-path: polygon(0 70%, 25% 50%, 45% 65%, 65% 40%, 85% 50%, 100% 20%, 95% 15%, 80% 45%, 60% 35%, 40% 55%, 20% 45%, 0 60%);
+}
+
+/* RIGHT ARROW */
+.welcome-wrapper .arrow-right {
+    right: -150px;
+    top: 80px;
+    transform: rotate(12deg);
+    clip-path: polygon(0 80%, 20% 60%, 40% 70%, 60% 45%, 80% 55%, 100% 10%, 92% 5%, 75% 40%, 55% 30%, 35% 55%, 15% 45%, 0 65%);
+}
+
+.login-header {
+    position: absolute;
+    top: 0;
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    color: #f4f7fb;
+    padding: 15px 80px;
+    z-index: 10;
+}
+
+.login-header .link {
+    color: #19f28a;
+    text-decoration: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.25s ease;
+}
+
+.login-header .link:hover {
+    color: #2edbff;
+}
+
+.login-header .back {
+    cursor: pointer;
+}
+
+.login-header .icon {
+    border: 1px solid rgba(25, 242, 138, 0.45);
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    padding: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 0 14px rgba(25, 242, 138, 0.12);
+}
+
+.login-header img {
+    width: 70px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto;
+}
+
+.login-header .login-logo p {
+    font-size: 18px;
+    margin-top: 8px;
+    color: #19f28a;
+    font-weight: 500;
+}
+
+.login-header .social-media {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.login-header .social-media .content {
+    display: flex;
+    color: #dffef4;
+    gap: 10px;
+    cursor: pointer;
+    transition: color 0.25s ease;
+}
+
+.login-header .social-media .content:hover {
+    color: #19f28a;
+}
+
+.welcome-card {
+    position: relative;
+    z-index: 5;
+    padding: 40px;
+    margin-top: 25px;
+    background:
+        linear-gradient(180deg, rgba(18, 27, 36, 0.96), rgba(10, 15, 22, 0.96));
+    color: white;
+    border-radius: 22px;
+    border: 1px solid rgba(46, 219, 255, 0.14);
+    box-shadow:
+        0 24px 50px rgba(0, 0, 0, 0.34),
+        0 0 30px rgba(25, 242, 138, 0.08);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    backdrop-filter: blur(10px);
+}
+
+.welcome-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 22px;
+    background: linear-gradient(135deg, rgba(25, 242, 138, 0.08), rgba(46, 219, 255, 0.05), rgba(124, 77, 255, 0.06));
+    pointer-events: none;
+}
+
+.welcome-card h1,
+.welcome-card .description,
+.welcome-card p,
+.welcome-card .welcome-grid,
+.welcome-card .login-btn {
+    position: relative;
+    z-index: 1;
+}
+
+.welcome-card h1 {
+    margin-bottom: 10px;
+    font-size: 2.7rem;
+    color: #f4f7fb;
+    text-align: center;
+}
+
+.welcome-card .description {
+    font-size: 15px;
+    text-align: center;
+    line-height: 1.6;
+    color: #9ab0c3;
+    max-width: 460px;
+}
+
+.welcome-card p {
+    color: #19f28a;
+    font-size: 1.4rem;
+    text-align: center;
+    padding: 8px 0;
+    font-weight: 600;
+}
+
+.welcome-card .welcome-grid {
+    display: grid;
+    gap: 10px;
+    position: relative;
+    margin-top: 10px;
+}
+
+.welcome-card .welcome-grid .welcome-info {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+}
+
+.welcome-card .welcome-grid .welcome-info label {
+    font-weight: 700;
+    font-size: 18px;
+    color: #ffffff;
+}
+
+.welcome-card .welcome-grid .welcome-info p {
+    color: #19f28a;
+    font-size: 18px;
+    margin-left: 4px;
+    padding: 0;
+}
+
+.welcome-card .login-btn {
+    text-align: center;
+    color: #03130d;
+    text-decoration: none;
+    width: 150px;
+    --p: 15px;
+    margin-top: 18px;
+    padding: 12px 25px;
+    background: linear-gradient(90deg, #19f28a 0%, #00cfc8 55%, #2edbff 100%);
+    clip-path: polygon(var(--p) 100%, calc(100% - var(--p)) 100%, 100% 0, 0 0);
+    border: none;
+    border-radius: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow:
+        0 0 20px rgba(25, 242, 138, 0.18),
+        0 12px 24px rgba(0, 0, 0, 0.22);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.welcome-card .login-btn:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        0 0 28px rgba(25, 242, 138, 0.24),
+        0 16px 28px rgba(0, 0, 0, 0.28);
+}
+
+.welcome-wrapper .signup-text {
+    margin-top: 10px;
+    background-color: transparent;
+    color: #9ab0c3;
+}
+
+.welcome-wrapper .signup-text .link {
+    color: #2edbff;
+    text-transform: none;
+}
+
+.forgot-password {
+    position: absolute;
+    right: 5px;
+    bottom: -20px;
+    text-decoration: none;
+    color: #2edbff;
+}
+
+/* =========================
+   Large Tablet (<= 1024px)
+========================= */
+@media (max-width: 1024px) {
+    .login-header {
+        padding: 15px 40px;
+    }
+
+    .welcome-wrapper .arrow {
+        width: 420px;
+        height: 300px;
+        opacity: 0.7;
+    }
+
+    .welcome-card {
+        padding: 30px;
+    }
+}
+
+/* =========================
+   Tablet / Small Laptop (<= 900px)
+========================= */
+@media (max-width: 900px) {
+    .welcome-wrapper .arrow-left {
+        left: -200px;
+    }
+
+    .welcome-wrapper .arrow-right {
+        right: -220px;
+    }
+}
+
+/* =========================
+   Mobile (<= 768px)
+========================= */
+@media (max-width: 768px) {
+    .login-header {
+        flex-direction: column;
+        gap: 15px;
+        padding: 15px 20px;
+        text-align: center;
+    }
+
+    .login-header .social-media {
+        grid-template-columns: repeat(3, auto);
+        justify-content: center;
+    }
+
+    .login-header .login-logo {
+        display: none;
+    }
+
+    .welcome-card {
+        width: 95%;
+        padding: 25px;
+    }
+
+    .welcome-wrapper .arrow {
+        display: none;
+    }
+}
+
+/* =========================
+   Small Mobile (<= 480px)
+========================= */
+@media (max-width: 480px) {
+    .welcome-card h1 {
+        font-size: 22px;
+    }
+
+    .welcome-card p {
+        font-size: 13px;
+    }
+
+    .welcome-card .login-btn {
+        width: 100%;
+    }
+}

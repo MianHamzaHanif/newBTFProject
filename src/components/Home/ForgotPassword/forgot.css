@@ -1,0 +1,319 @@
+.forgot-wrapper .crypto-bg {
+    min-height: 100vh;
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at top left, #00ff9955, transparent 40%),
+        radial-gradient(circle at bottom right, #00ff9966, transparent 45%),
+        linear-gradient(180deg, #021b12, #02140f);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ================= WAVES ================= */
+.forgot-wrapper .bg-waves {
+    position: absolute;
+    inset: 0;
+    background:
+        repeating-linear-gradient(160deg,
+            transparent 0px,
+            transparent 28px,
+            rgba(0, 255, 153, 0.06) 30px);
+    animation: waveMove 25s linear infinite;
+    opacity: 0.6;
+}
+
+@keyframes waveMove {
+    from {
+        background-position: 0 0;
+    }
+
+    to {
+        background-position: 800px 400px;
+    }
+}
+
+/* ================= ARROWS ================= */
+.forgot-wrapper .arrow {
+    position: absolute;
+    width: 520px;
+    height: 360px;
+    background: linear-gradient(120deg,
+            transparent,
+            #00ff99aa,
+            transparent);
+    filter: blur(1px);
+}
+
+/* LEFT ARROW */
+.forgot-wrapper .arrow-left {
+    left: -120px;
+    bottom: 120px;
+    transform: rotate(-15deg);
+    clip-path: polygon(0 70%,
+            25% 50%,
+            45% 65%,
+            65% 40%,
+            85% 50%,
+            100% 20%,
+            95% 15%,
+            80% 45%,
+            60% 35%,
+            40% 55%,
+            20% 45%,
+            0 60%);
+}
+
+/* RIGHT ARROW */
+.forgot-wrapper .arrow-right {
+    right: -150px;
+    top: 80px;
+    transform: rotate(12deg);
+    clip-path: polygon(0 80%,
+            20% 60%,
+            40% 70%,
+            60% 45%,
+            80% 55%,
+            100% 10%,
+            92% 5%,
+            75% 40%,
+            55% 30%,
+            35% 55%,
+            15% 45%,
+            0 65%);
+}
+
+.login-header {
+    position: absolute;
+    top: 0;
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    color: #fff;
+    padding: 15px 80px;
+}
+
+.login-header .link {
+    color: #00ff99;
+    text-decoration: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+}
+
+.login-header .back {
+    cursor: pointer;
+}
+
+
+
+.login-header .icon {
+    border: 2px solid #00ff99;
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    padding: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    /* margin-bottom: 5px; */
+}
+
+.login-header img {
+    width: 70px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0px auto;
+}
+
+.login-header .login-logo p {
+    font-size: 18px;
+    margin-top: 8px;
+    color: #00ff99;
+    font-weight: 500;
+}
+
+.login-header .social-media {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.login-header .social-media .content {
+    display: flex;
+    color: #00ff99;
+    gap: 10px;
+    cursor: pointer;
+}
+
+.forgot-card {
+    position: relative;
+    z-index: 5;
+    padding: 40px;
+    background: linear-gradient(180deg, #062a1d, #02140f);
+    color: white;
+    border-radius: 16px;
+    box-shadow: 0 0 35px #00ff9966;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+.forgot-card h1 {
+    margin-bottom: 15px;
+    font-size: 28px;
+}
+
+.forgot-card p {
+    color: #00ff99;
+    font-size: 15px;
+}
+
+.forgot-card .form-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    margin: 25px 0px;
+    position: relative;
+}
+
+.forgot-card .form-grid input {
+    padding: 10px 12px;
+    background: #04140e;
+    border: 1px solid #00ff9955;
+    color: white;
+    border-radius: 6px;
+    width: 100%;
+}
+
+.forgot-card .form-grid input:focus {
+    outline: none;
+    border-color: #00ff99;
+    box-shadow: 0 0 8px #00ff9955;
+}
+
+.forgot-card button {
+    width: 200px;
+    --p: 15px;
+    margin-top: 12px;
+    padding: 12px 25px;
+    background: linear-gradient(180deg, #baffdf, #00ff99);
+    background: linear-gradient(180deg,
+            #b0ed39 0%,
+            #4cc800 100%);
+
+    clip-path: polygon(var(--p) 100%,
+            calc(100% - var(--p)) 100%,
+            100% 0,
+            0 0);
+    border: none;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.forgot-wrapper .signup-text {
+    margin-top: 10px;
+    background-color: transparent;
+}
+
+.forgot-wrapper .signup-text .link {
+    color: blue;
+    text-transform: none;
+}
+
+.fotgot-password {
+    position: absolute;
+    right: 5px;
+    bottom: -20px;
+    text-decoration: none;
+}
+
+/* =========================
+   Large Tablet (≤ 1024px)
+========================= */
+@media (max-width: 1024px) {
+    .login-header {
+        padding: 15px 40px;
+    }
+
+    .forgot-wrapper .arrow {
+        width: 420px;
+        height: 300px;
+        opacity: 0.7;
+    }
+
+    .forgot-card {
+        padding: 30px;
+    }
+}
+
+/* =========================
+   Tablet / Small Laptop (≤ 900px)
+========================= */
+@media (max-width: 900px) {
+    .forgot-card .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .forgot-wrapper .arrow-left {
+        left: -200px;
+    }
+
+    .forgot-wrapper .arrow-right {
+        right: -220px;
+    }
+}
+
+/* =========================
+   Mobile (≤ 768px)
+========================= */
+@media (max-width: 768px) {
+    .login-header {
+        flex-direction: column;
+        gap: 15px;
+        padding: 15px 20px;
+        text-align: center;
+    }
+
+    .login-header .social-media {
+        grid-template-columns: repeat(3, auto);
+        justify-content: center;
+    }
+
+    .login-header .login-logo {
+        display: none;
+    }
+
+    .forgot-card {
+        width: 95%;
+        padding: 25px;
+    }
+
+    .forgot-wrapper .arrow {
+        display: none;
+        /* mobile me arrows hide */
+    }
+}
+
+/* =========================
+   Small Mobile (≤ 480px)
+========================= */
+@media (max-width: 480px) {
+    .forgot-card h1 {
+        font-size: 22px;
+    }
+
+    .forgot-card p {
+        font-size: 13px;
+    }
+
+    .forgot-card button {
+        width: 100%;
+    }
+}
