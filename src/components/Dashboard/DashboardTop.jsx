@@ -723,9 +723,12 @@ const DashboardTop = () => {
         setBuyStatus("Buy transaction is pending or failed. Check wallet Activity, then try Buy again.");
         return;
       }
-      setBuyStatus("Buy transaction sent successfully.");
+      setBuyStatus("Package activated successfully. Refreshing dashboard...");
       await Promise.all([loadPlanActivity(), loadDayCycle(), loadPackageWarnings()]);
       window.dispatchEvent(new Event("btf:v2-data-changed"));
+      // Other dashboard cards use independent reads. A complete reload after
+      // the confirmed receipt ensures every card uses the new chain state.
+      window.setTimeout(() => window.location.reload(), 700);
 
     } catch (error) {
       console.error("Buy package failed:", error);
