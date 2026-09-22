@@ -30,11 +30,20 @@ export const getReadWalletAddress = async () => {
   return ethers.isAddress(saved) ? saved : "";
 };
 
-// Read-only blockchain calls must not use the injected wallet RPC. Trust Wallet
-// can reject or time out those calls even after the account is connected.
-export const createBscReadProvider = () =>
-  new ethers.JsonRpcProvider(
-    BSC_TESTNET.rpcUrls[0],
-    BSC_TESTNET.chainId,
-    { staticNetwork: true },
-  );
+// Read-only blockchain calls must not use the injected wallet RPC. A single
+// shared provider lets ethers batch calls from dashboard cards into one RPC
+// request instead of opening a new provider for every component refresh.
+const readRequest = new ethers.FetchRequest(BSC_TESTNET.rpcUrls[1]);
+readRequest.timeout = 12_000;
+
+const bscReadProvider = new ethers.JsonRpcProvider(
+  readRequest,
+  BSC_TESTNET.chainId,
+  {
+    staticNetwork: true,
+    batchMaxCount: 100,
+    batchStallTime: 0,
+  },
+);
+
+export const createBscReadProvider = () => bscReadProvider;

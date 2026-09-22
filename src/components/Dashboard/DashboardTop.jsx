@@ -15,7 +15,7 @@ import {
   TokenAddress,
 } from "../../blockchain/address";
 import { BSC_TESTNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscTestnetConfig";
-import { getReadWalletAddress } from "../../blockchain/readProvider";
+import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 
 const DashboardTop = () => {
   const { SetSidebarOpen } = useOutletContext();
@@ -100,7 +100,7 @@ const DashboardTop = () => {
       // V2-only dashboard plan data.
       const wallet = await getReadWalletAddress();
       if (!wallet || !ethers.isAddress(wallet)) throw new Error("WALLET");
-      const v2Provider = new ethers.JsonRpcProvider(BSC_TESTNET.rpcUrls[1], BSC_TESTNET.chainId, { staticNetwork: true });
+      const v2Provider = createBscReadProvider();
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
       const [historyLengthRaw, roiDayRaw] = await Promise.all([
         v2Manager.getPackageHistoryLength(wallet),
@@ -224,7 +224,7 @@ const DashboardTop = () => {
 
   const loadDayCycle = useCallback(async () => {
     try {
-      const v2DayProvider = new ethers.JsonRpcProvider(BSC_TESTNET.rpcUrls[1], BSC_TESTNET.chainId, { staticNetwork: true });
+      const v2DayProvider = createBscReadProvider();
       const v2DayManager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2DayProvider);
       const [roiDayRaw, roiStartRaw, v2LatestBlock] = await Promise.all([
         v2DayManager.ROI_DAY(),
@@ -287,7 +287,7 @@ const DashboardTop = () => {
         setPurchaseSafety({ blocked: false, effectiveRemaining: 0n });
         return;
       }
-      const v2WarningProvider = new ethers.JsonRpcProvider(BSC_TESTNET.rpcUrls[1], BSC_TESTNET.chainId, { staticNetwork: true });
+      const v2WarningProvider = createBscReadProvider();
       const v2WarningManager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2WarningProvider);
       const [limit, used] = await Promise.all([
         v2WarningManager.totalIncomeLimit(wallet),

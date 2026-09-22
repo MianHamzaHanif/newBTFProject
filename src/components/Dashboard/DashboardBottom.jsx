@@ -16,7 +16,7 @@ import {
   V2LedgerAddress,
 } from "../../blockchain/address";
 import { BSC_TESTNET } from "../../blockchain/bscTestnetConfig";
-import { getReadWalletAddress } from "../../blockchain/readProvider";
+import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 
 const TOKEN_LABEL = "USDT";
 
@@ -130,9 +130,7 @@ const DashboardBottom = () => {
 
         // V2-only dashboard statistics. Earnings are V2 Ledger credits and
         // withdrawals are V2 Ledger withdrawal records.
-        const v2Provider = new ethers.JsonRpcProvider(
-          BSC_TESTNET.rpcUrls[1], BSC_TESTNET.chainId, { staticNetwork: true },
-        );
+        const v2Provider = createBscReadProvider();
         const v2Token = new ethers.Contract(TokenAddress, [
           "function decimals() view returns (uint8)",
           "function balanceOf(address owner) view returns (uint256)",
