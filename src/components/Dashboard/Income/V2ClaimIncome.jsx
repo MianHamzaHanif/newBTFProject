@@ -130,6 +130,9 @@ export default function V2ClaimIncome() {
 
   useEffect(() => {
     loadClaimData();
+    const handleV2DataChanged = () => loadClaimData();
+    window.addEventListener("btf:v2-data-changed", handleV2DataChanged);
+    return () => window.removeEventListener("btf:v2-data-changed", handleV2DataChanged);
   }, [loadClaimData]);
 
   const claim = async (method) => {
@@ -151,6 +154,7 @@ export default function V2ClaimIncome() {
       await tx.wait();
       setMessage("Income claimed successfully and credited to the V2 ledger.");
       await loadClaimData();
+      window.dispatchEvent(new Event("btf:v2-data-changed"));
     } catch (error) {
       setMessage(error?.shortMessage || error?.reason || error?.message || "Claim failed.");
     } finally {

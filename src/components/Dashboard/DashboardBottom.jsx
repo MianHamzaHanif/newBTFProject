@@ -366,11 +366,14 @@ const DashboardBottom = () => {
     };
 
     const handleAccountsChanged = () => loadDashboardData();
+    const handleV2DataChanged = () => loadDashboardData();
     loadDashboardData();
     window.ethereum.on("accountsChanged", handleAccountsChanged);
+    window.addEventListener("btf:v2-data-changed", handleV2DataChanged);
 
     return () => {
       window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+      window.removeEventListener("btf:v2-data-changed", handleV2DataChanged);
     };
   }, []);
 

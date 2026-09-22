@@ -469,20 +469,21 @@ const DashboardTop = () => {
       setIsBuying(true);
       setBuyStatus("Connecting wallet...");
 
-      await window.ethereum.request({ method: "eth_requestAccounts" });
+      // Do not trigger an unnecessary MetaMask connect popup for a wallet
+      // that is already connected to this site.
+      let accounts = await window.ethereum.request({ method: "eth_accounts" });
+      if (!accounts?.[0]) {
+        accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      }
       await ensureBscTestnet();
-
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const userAddress = await signer.getAddress();
+      const userAddress = accounts?.[0] || "";
+      if (!ethers.isAddress(userAddress)) throw new Error("Wallet account not available");
 
       // A package can only be purchased after registration. This check must
       // run before direct-buy mode so an unregistered wallet never sends an
       // opaque wallet request that results in a generic RPC error.
       setBuyStatus("Checking registration...");
-      const registrationProvider = new ethers.JsonRpcProvider(
-        BSC_TESTNET.rpcUrls[1], BSC_TESTNET.chainId, { staticNetwork: true },
-      );
+      const registrationProvider = createBscReadProvider();
       const registrationContract = new ethers.Contract(
         ReferralNetworkAddress,
         V2ReferralRegistryABI,
@@ -538,11 +539,19 @@ const DashboardTop = () => {
 
       if (currentAllowance < directPackageAmount) {
         setBuyStatus("Approve USDT in your wallet first...");
-        const approveTx = await tokenReadContract
-          .connect(signer)
-          .approve(PackageManagerAddress, directPackageAmount);
+        const tokenInterface = new ethers.Interface([
+          "function approve(address spender,uint256 amount) returns (bool)",
+        ]);
+        const approveHash = await window.ethereum.request({
+          method: "eth_sendTransaction",
+          params: [{
+            from: userAddress,
+            to: TokenAddress,
+            data: tokenInterface.encodeFunctionData("approve", [PackageManagerAddress, directPackageAmount]),
+          }],
+        });
         const approveReceipt = await registrationProvider
-          .waitForTransaction(approveTx.hash, 1, 180000)
+          .waitForTransaction(approveHash, 1, 180000)
           .catch(() => null);
         if (!approveReceipt || approveReceipt.status !== 1) {
           setBuyStatus("USDT approval is pending or failed. Check wallet Activity, then try Buy again.");
@@ -569,6 +578,8 @@ const DashboardTop = () => {
         return;
       }
       setBuyStatus("Buy transaction sent successfully.");
+      await Promise.all([loadPlanActivity(), loadDayCycle(), loadPackageWarnings()]);
+      window.dispatchEvent(new Event("btf:v2-data-changed"));
 
     } catch (error) {
       console.error("Buy package failed:", error);
