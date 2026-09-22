@@ -229,6 +229,13 @@
     color: #ffffff;
 }
 
+.dt-right .plan-self-roi-ready {
+    margin-top: 3px;
+    color: #19f28a;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
 .timer {
     display: flex;
     gap: 8px;

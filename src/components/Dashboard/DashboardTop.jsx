@@ -32,6 +32,7 @@ const DashboardTop = () => {
   const [planActivity, setPlanActivity] = useState({
     progressText: "0% / 0%",
     activeStakeLabel: "No active package",
+    selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
     remainingSeconds: 0,
   });
   const [dayCycle, setDayCycle] = useState({
@@ -91,6 +92,7 @@ const DashboardTop = () => {
       setPlanActivity({
         progressText: "0% / 0%",
         activeStakeLabel: "No active package",
+        selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
         remainingSeconds: 0,
       });
       return;
@@ -102,18 +104,20 @@ const DashboardTop = () => {
       if (!wallet || !ethers.isAddress(wallet)) throw new Error("WALLET");
       const v2Provider = createBscReadProvider();
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
-      const [historyLengthRaw, roiDayRaw] = await Promise.all([
-        v2Manager.getPackageHistoryLength(wallet),
+      const [principal, maximum, generated, selfRoiReady, roiDayRaw] = await Promise.all([
+        v2Manager.selfRoiPrincipal(wallet),
+        v2Manager.selfRoiMaximum(wallet),
+        v2Manager.selfRoiGenerated(wallet),
+        v2Manager.getIncomeReady(wallet, 1),
         v2Manager.ROI_DAY(),
       ]);
-      const historyLength = Number(historyLengthRaw);
-      if (historyLength === 0) {
-        setPlanActivity({ progressText: "0% / 300%", activeStakeLabel: "No active package", remainingSeconds: 0 });
-        return;
-      }
-      const record = await v2Manager.getPackageHistoryAt(wallet, historyLength - 1);
-      if (!record.active) {
-        setPlanActivity({ progressText: "300% / 300%", activeStakeLabel: "Package inactive", remainingSeconds: 0 });
+      if (BigInt(principal) === 0n || BigInt(maximum) === 0n) {
+        setPlanActivity({
+          progressText: "0% / 300.0000%",
+          activeStakeLabel: "No active package",
+          selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfRoiReady)} USDT`,
+          remainingSeconds: 0,
+        });
         return;
       }
       const v2LatestBlock = await v2Provider.getBlock("latest");
@@ -124,8 +128,11 @@ const DashboardTop = () => {
       const v2CycleProgress = v2Elapsed % v2RoiDay;
       const v2RemainingSeconds = v2CycleProgress === 0 ? v2RoiDay : v2RoiDay - v2CycleProgress;
       setPlanActivity({
-        progressText: `${toPercent2(record.roiGenerated, record.amount)}% / 300.0000%`,
-        activeStakeLabel: `Active: ${formatEther2(record.amount)} USDT (Package #${historyLength})`,
+        // selfRoiGenerated is never reset by a claim. It therefore includes
+        // both claimed and currently-ready Self ROI for active packages.
+        progressText: `${toPercent2(generated, principal)}% / 300.0000%`,
+        activeStakeLabel: `Active Self Deposit: ${formatEther2(principal)} USDT`,
+        selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfRoiReady)} USDT`,
         remainingSeconds: v2RemainingSeconds,
       });
       return;
@@ -136,6 +143,7 @@ const DashboardTop = () => {
         setPlanActivity({
           progressText: "0% / 0%",
           activeStakeLabel: "No active package",
+          selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
           remainingSeconds: 0,
         });
         return;
@@ -184,6 +192,7 @@ const DashboardTop = () => {
         setPlanActivity({
           progressText: "100% / 100%",
           activeStakeLabel: "All packages completed",
+          selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
           remainingSeconds: 0,
         });
         return;
@@ -211,12 +220,14 @@ const DashboardTop = () => {
       setPlanActivity({
         progressText: `${achievedPercentText}% / ${targetPercentText}%`,
         activeStakeLabel: `Active: ${formatEther2(packageValue)} (Package #${activeIndex + 1})`,
+        selfRoiReadyLabel: "",
         remainingSeconds,
       });
     } catch {
       setPlanActivity({
         progressText: "0% / 0%",
         activeStakeLabel: "No active package",
+        selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
         remainingSeconds: 0,
       });
     }
@@ -667,6 +678,9 @@ const DashboardTop = () => {
           <span>{planActivity.progressText}</span>
         </h3>
         <p className="small-title">{planActivity.activeStakeLabel}</p>
+        {planActivity.selfRoiReadyLabel && (
+          <p className="small-title plan-self-roi-ready">{planActivity.selfRoiReadyLabel}</p>
+        )}
 
         {/*
         <div className="timer">
