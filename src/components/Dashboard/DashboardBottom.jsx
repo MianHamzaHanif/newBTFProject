@@ -146,12 +146,22 @@ const DashboardBottom = () => {
           v2Token.balanceOf(walletAddress),
           v2Registry.users(walletAddress),
         ]);
-        const incomeRecords = await Promise.all(
+        // These three read groups are independent. Start all of them before
+        // awaiting so a large income history does not delay level status.
+        const incomeRecordsPromise = Promise.all(
           Array.from({ length: Number(incomeLengthRaw) }, (_, index) => v2Ledger.getUserIncomeHistoryAt(walletAddress, index))
         );
-        const withdrawRecords = await Promise.all(
+        const withdrawRecordsPromise = Promise.all(
           Array.from({ length: Number(withdrawLengthRaw) }, (_, index) => v2Ledger.getUserWithdrawHistoryAt(walletAddress, index))
         );
+        const levelOpenPromise = Promise.all(
+          Array.from({ length: 15 }, (_, index) => v2Registry.isLevelOpen(walletAddress, index).catch(() => false))
+        );
+        const [incomeRecords, withdrawRecords, levelOpen] = await Promise.all([
+          incomeRecordsPromise,
+          withdrawRecordsPromise,
+          levelOpenPromise,
+        ]);
         const totalsByType = { direct: 0n, roi: 0n, power: 0n, reward: 0n };
         let totalEarned = 0n;
         for (const record of incomeRecords) {
@@ -164,9 +174,6 @@ const DashboardBottom = () => {
           else if (incomeType === 4) totalsByType.reward += amount;
         }
         const totalWithdrawn = withdrawRecords.reduce((total, record) => total + BigInt(record.amount ?? record[0]), 0n);
-        const levelOpen = await Promise.all(
-          Array.from({ length: 15 }, (_, index) => v2Registry.isLevelOpen(walletAddress, index).catch(() => false))
-        );
         const v2OpenCount = levelOpen.filter(Boolean).length;
         const v2IsRegistered = Boolean(v2UserData.exists ?? v2UserData[8]);
         setStats({ totalEarned: formatUsd(totalEarned), totalInvested: formatUsd(totalInvested), totalWithdrawn: formatUsd(totalWithdrawn) });
