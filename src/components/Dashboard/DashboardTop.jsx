@@ -104,14 +104,14 @@ const DashboardTop = () => {
       if (!wallet || !ethers.isAddress(wallet)) throw new Error("WALLET");
       const v2Provider = createBscReadProvider();
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
-      const [principal, maximum, generated, selfRoiReady, roiDayRaw] = await Promise.all([
+      const [activeSelfRoiPrincipal, activeSelfRoiMaximum, activeSelfRoiGenerated, selfRoiReady, roiDayRaw] = await Promise.all([
         v2Manager.selfRoiPrincipal(wallet),
         v2Manager.selfRoiMaximum(wallet),
         v2Manager.selfRoiGenerated(wallet),
         v2Manager.getIncomeReady(wallet, 1),
         v2Manager.ROI_DAY(),
       ]);
-      if (BigInt(principal) === 0n || BigInt(maximum) === 0n) {
+      if (BigInt(activeSelfRoiPrincipal) === 0n || BigInt(activeSelfRoiMaximum) === 0n) {
         setPlanActivity({
           progressText: "0% / 300.0000%",
           activeStakeLabel: "No active package",
@@ -130,8 +130,8 @@ const DashboardTop = () => {
       setPlanActivity({
         // selfRoiGenerated is never reset by a claim. It therefore includes
         // both claimed and currently-ready Self ROI for active packages.
-        progressText: `${toPercent2(generated, principal)}% / 300.0000%`,
-        activeStakeLabel: `Active Self Deposit: ${formatEther2(principal)} USDT`,
+        progressText: `${toPercent2(activeSelfRoiGenerated, activeSelfRoiPrincipal)}% / 300.0000%`,
+        activeStakeLabel: `Active Self Deposit: ${formatEther2(activeSelfRoiPrincipal)} USDT`,
         selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfRoiReady)} USDT`,
         remainingSeconds: v2RemainingSeconds,
       });
