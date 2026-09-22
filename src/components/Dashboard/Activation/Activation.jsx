@@ -47,7 +47,7 @@ export const Activation = () => {
           V2PackageManagerABI,
           provider
         );
-        const [currentPackage, totalPackages, totalSpent, roiPrincipal, roiMaximum, roiGenerated, pendingRoi, roiDay] =
+        const [currentPackage, totalPackages, totalSpent, roiPrincipal, roiMaximum, roiGenerated, pendingRoi, roiDay, totalIncomeLimit] =
           await Promise.all([
             packageManager.currentPackage(user),
             packageManager.totalPackageValue(user),
@@ -56,7 +56,8 @@ export const Activation = () => {
             packageManager.selfRoiMaximum(user),
             packageManager.selfRoiGenerated(user),
             packageManager.pendingSelfRoi(user),
-            packageManager.ROI_DAY()
+            packageManager.ROI_DAY(),
+            packageManager.totalIncomeLimit(user)
           ]);
 
         if (totalPackages === 0n) {
@@ -127,6 +128,7 @@ export const Activation = () => {
           roiMaximum: formatUsdt(roiMaximum),
           roiGenerated: formatUsdt(roiGenerated),
           pendingRoi: formatUsdt(pendingRoi),
+          totalIncomeLimit: formatUsdt(totalIncomeLimit),
           roiDay: `${Number(roiDay) / 60} minutes`
         });
         setRows(rowsWithTime);
@@ -171,6 +173,10 @@ export const Activation = () => {
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Self ROI 3x Limit</p>
             <h4 className="withdrawal-card-value">{summary.roiMaximum}</h4>
+          </div>
+          <div className="withdrawal-card">
+            <p className="withdrawal-card-title">Overall Income Claim Limit</p>
+            <h4 className="withdrawal-card-value">{summary.totalIncomeLimit}</h4>
           </div>
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Total Package Value Purchased</p>

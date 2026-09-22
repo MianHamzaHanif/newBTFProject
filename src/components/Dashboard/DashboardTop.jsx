@@ -8,11 +8,13 @@ import PackageManagerLensABI from "../../blockchain/packageManagerLensABI.json";
 import ReferralNetworkABI from "../../blockchain/referralNetworkABI.json";
 import V2PackageManagerABI from "../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../blockchain/v2ReferralRegistryABI";
+import V2IncomeLedgerABI from "../../blockchain/v2IncomeLedgerABI";
 import {
   PackageManagerAddress,
   PackageManagerLensAddress,
   ReferralNetworkAddress,
   TokenAddress,
+  V2LedgerAddress,
 } from "../../blockchain/address";
 import { BSC_TESTNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscTestnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
@@ -72,10 +74,19 @@ const DashboardTop = () => {
         return "0.00";
       }
       const scaled = (num * 10000n) / den;
-      return formatNumber2(Number(scaled) / 100);
+      return (Number(scaled) / 100).toFixed(2);
     } catch {
       return "0.00";
     }
+  };
+
+  const incomeLimitForPackage = (amount) => {
+    const packageAmount = BigInt(amount ?? 0n);
+    if (packageAmount === ethers.parseEther("25")) return ethers.parseEther("75");
+    if (packageAmount === ethers.parseEther("100")) return ethers.parseEther("500");
+    if (packageAmount === ethers.parseEther("500")) return ethers.parseEther("3500");
+    if (packageAmount === ethers.parseEther("1000")) return ethers.parseEther("10000");
+    return 0n;
   };
 
   const formatCountdown = (totalSeconds) => {
@@ -104,35 +115,87 @@ const DashboardTop = () => {
       if (!wallet || !ethers.isAddress(wallet)) throw new Error("WALLET");
       const v2Provider = createBscReadProvider();
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
-      const [activeSelfRoiPrincipal, activeSelfRoiMaximum, activeSelfRoiGenerated, selfRoiReady, roiDayRaw] = await Promise.all([
-        v2Manager.selfRoiPrincipal(wallet),
-        v2Manager.selfRoiMaximum(wallet),
-        v2Manager.selfRoiGenerated(wallet),
+      const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
+      const [currentPackage, totalIncomeLimit, packageHistoryLength, incomeHistoryLength, directReady, selfRoiReady, levelRoiReady, powerReady, rewardReady, roiDayRaw, roiStartRaw] = await Promise.all([
+        v2Manager.currentPackage(wallet),
+        v2Manager.totalIncomeLimit(wallet),
+        v2Manager.getPackageHistoryLength(wallet),
+        v2Ledger.getUserIncomeHistoryLength(wallet),
+        v2Manager.getIncomeReady(wallet, 0),
         v2Manager.getIncomeReady(wallet, 1),
+        v2Manager.getIncomeReady(wallet, 2),
+        v2Manager.getIncomeReady(wallet, 3),
+        v2Manager.getIncomeReady(wallet, 4),
         v2Manager.ROI_DAY(),
+        v2Manager.roiStartTime(),
       ]);
-      if (BigInt(activeSelfRoiPrincipal) === 0n || BigInt(activeSelfRoiMaximum) === 0n) {
+      if (BigInt(currentPackage) === 0n || BigInt(totalIncomeLimit) === 0n) {
         setPlanActivity({
-          progressText: "0% / 300.0000%",
+          progressText: "0% / 0%",
           activeStakeLabel: "No active package",
           selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfRoiReady)} USDT`,
           remainingSeconds: 0,
         });
         return;
       }
+      const packageHistory = await Promise.all(
+        Array.from(
+          { length: Number(packageHistoryLength) },
+          (_, index) => v2Manager.getPackageHistoryAt(wallet, index),
+        ),
+      );
+      const activeIncomeLimit = packageHistory.reduce(
+        (total, record) => {
+          const isActive = Boolean(record.active ?? record[5]);
+          return isActive ? total + incomeLimitForPackage(record.amount ?? record[0]) : total;
+        },
+        0n,
+      );
+      const closedPackageLimit = packageHistory.reduce(
+        (total, record) => {
+          const isActive = Boolean(record.active ?? record[5]);
+          return isActive ? total : total + incomeLimitForPackage(record.amount ?? record[0]);
+        },
+        0n,
+      );
+      const incomeHistory = await Promise.all(
+        Array.from(
+          { length: Number(incomeHistoryLength) },
+          (_, index) => v2Ledger.getUserIncomeHistoryAt(wallet, index),
+        ),
+      );
+      const totalClaimedIncome = incomeHistory.reduce(
+        (total, record) => total + BigInt(record.amount ?? record[2] ?? 0n),
+        0n,
+      );
+      const currentReadyIncome = BigInt(directReady)
+        + BigInt(selfRoiReady)
+        + BigInt(levelRoiReady)
+        + BigInt(powerReady)
+        + BigInt(rewardReady);
+      // Lifetime non-Flush claimed income plus all ready income, less every
+      // completed FIFO cap, is the progress of the still-active packages.
+      const projectedActiveIncome = totalClaimedIncome + currentReadyIncome > closedPackageLimit
+        ? totalClaimedIncome + currentReadyIncome - closedPackageLimit
+        : 0n;
+      const cappedActiveIncomeProgress = projectedActiveIncome > activeIncomeLimit
+        ? activeIncomeLimit
+        : projectedActiveIncome;
       const v2LatestBlock = await v2Provider.getBlock("latest");
       const v2RoiDay = Number(roiDayRaw) || 120;
       const v2Now = Number(v2LatestBlock?.timestamp ?? Math.floor(Date.now() / 1000));
-      const v2BoughtAt = Number(record.purchasedAt);
-      const v2Elapsed = Math.max(0, v2Now - v2BoughtAt);
+      // V2 ROI boundaries are fixed from contract deployment, not from an
+      // old-package history record. Using the immutable V2 start avoids the
+      // old `record` reference that caused active plan reads to fall back.
+      const v2RoiStart = Number(roiStartRaw);
+      const v2Elapsed = Math.max(0, v2Now - v2RoiStart);
       const v2CycleProgress = v2Elapsed % v2RoiDay;
       const v2RemainingSeconds = v2CycleProgress === 0 ? v2RoiDay : v2RoiDay - v2CycleProgress;
       setPlanActivity({
-        // selfRoiGenerated is never reset by a claim. It therefore includes
-        // both claimed and currently-ready Self ROI for active packages.
-        progressText: `${toPercent2(activeSelfRoiGenerated, activeSelfRoiPrincipal)}% / 300.0000%`,
-        activeStakeLabel: `Active Self Deposit: ${formatEther2(activeSelfRoiPrincipal)} USDT`,
-        selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfRoiReady)} USDT`,
+        // Claimed/used income plus all currently ready V2 income, excluding Flush.
+        progressText: `${toPercent2(cappedActiveIncomeProgress, activeIncomeLimit)}% / 100.00%`,
+        activeStakeLabel: `Active income limit: ${formatEther2(activeIncomeLimit)} USDT`,
+        selfRoiReadyLabel: "",
         remainingSeconds: v2RemainingSeconds,
       });
       return;
@@ -300,16 +363,99 @@ const DashboardTop = () => {
       }
       const v2WarningProvider = createBscReadProvider();
       const v2WarningManager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2WarningProvider);
-      const [limit, used] = await Promise.all([
+      const v2WarningLedger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2WarningProvider);
+      const [limit, historyLengthRaw, incomeHistoryLengthRaw, directReady, selfRoiReady, levelRoiReady, powerReady, rewardReady] = await Promise.all([
         v2WarningManager.totalIncomeLimit(wallet),
-        v2WarningManager.totalIncomeUsed(wallet),
+        v2WarningManager.getPackageHistoryLength(wallet),
+        v2WarningLedger.getUserIncomeHistoryLength(wallet),
+        v2WarningManager.getIncomeReady(wallet, 0),
+        v2WarningManager.getIncomeReady(wallet, 1),
+        v2WarningManager.getIncomeReady(wallet, 2),
+        v2WarningManager.getIncomeReady(wallet, 3),
+        v2WarningManager.getIncomeReady(wallet, 4),
       ]);
-      const remaining = BigInt(limit) > BigInt(used) ? BigInt(limit) - BigInt(used) : 0n;
-      setPurchaseSafety({ blocked: false, effectiveRemaining: remaining });
+      const incomeLimit = BigInt(limit);
+      const historyLength = Number(historyLengthRaw);
+      const packageHistory = await Promise.all(
+        Array.from(
+          { length: historyLength },
+          (_, index) => v2WarningManager.getPackageHistoryAt(wallet, index),
+        ),
+      );
+      const activeIncomeLimit = packageHistory.reduce(
+        (total, record) => {
+          const isActive = Boolean(record.active ?? record[5]);
+          return isActive ? total + incomeLimitForPackage(record.amount ?? record[0]) : total;
+        },
+        0n,
+      );
+      const closedPackageLimit = packageHistory.reduce(
+        (total, record) => {
+          const isActive = Boolean(record.active ?? record[5]);
+          return isActive ? total : total + incomeLimitForPackage(record.amount ?? record[0]);
+        },
+        0n,
+      );
+      const incomeHistory = await Promise.all(
+        Array.from(
+          { length: Number(incomeHistoryLengthRaw) },
+          (_, index) => v2WarningLedger.getUserIncomeHistoryAt(wallet, index),
+        ),
+      );
+      const totalClaimedIncome = incomeHistory.reduce(
+        (total, record) => total + BigInt(record.amount ?? record[2] ?? 0n),
+        0n,
+      );
+      const currentReady =
+        BigInt(directReady) +
+        BigInt(selfRoiReady) +
+        BigInt(levelRoiReady) +
+        BigInt(powerReady) +
+        BigInt(rewardReady);
+      // Warning progress is the user's real position after all amounts that
+      // are already ready for a claim. The claim transaction remains the
+      // only place where the cap is enforced and overflow is flushed.
+      const activeIncomeProgress = totalClaimedIncome + currentReady > closedPackageLimit
+        ? totalClaimedIncome + currentReady - closedPackageLimit
+        : 0n;
+      const projectedUsed = activeIncomeProgress > activeIncomeLimit
+        ? activeIncomeLimit
+        : activeIncomeProgress;
+      const projectedRemaining = activeIncomeLimit > projectedUsed
+        ? activeIncomeLimit - projectedUsed
+        : 0n;
+      const capAlreadyCompleted = activeIncomeLimit !== 0n && activeIncomeProgress >= activeIncomeLimit;
+      setPurchaseSafety({ blocked: false, effectiveRemaining: projectedRemaining });
+      // When every FIFO package is exhausted the manager intentionally resets
+      // totalIncomeLimit/Used to zero. Read the last history row so the user
+      // still sees that their previous package completed and is now inactive.
+      if (incomeLimit === 0n && historyLength > 0) {
+        const lastPackage = await v2WarningManager.getPackageHistoryAt(wallet, historyLength - 1);
+        const deactivatedAt = BigInt(lastPackage.deactivatedAt ?? lastPackage[2] ?? 0n);
+        if (deactivatedAt !== 0n) {
+          setPackageWarnings([{
+            completed: true,
+            inactive: true,
+            packageAmount: BigInt(lastPackage.amount ?? lastPackage[0] ?? 0n),
+          }]);
+          return;
+        }
+      }
       setPackageWarnings(
-        BigInt(limit) !== 0n && remaining !== 0n && remaining <= BigInt(limit) / 4n
-          ? [{ remaining, incomeLimit: BigInt(limit) }]
-          : []
+        activeIncomeLimit === 0n
+          ? []
+            : capAlreadyCompleted
+            ? [{ remaining: 0n, incomeLimit: activeIncomeLimit, projectedUsed: activeIncomeLimit, currentReady, completed: true }]
+            : projectedRemaining <= activeIncomeLimit / 4n
+              ? [{
+                remaining: projectedRemaining,
+                incomeLimit: activeIncomeLimit,
+                projectedUsed,
+                currentReady,
+                completed: false,
+                willComplete: projectedRemaining === 0n,
+              }]
+              : []
       );
       return;
 
@@ -626,19 +772,38 @@ const DashboardTop = () => {
         </button>
         {buyStatus && <p className="buy-status">{buyStatus}</p>}
         {packageWarnings.map((warning) => (
-          <div className="package-warning" key="combined-income-limit" role="status">
-            <strong>Package Nearing Completion</strong>
-            <span>
-              Your combined packages have {formatEther2(warning.remaining)} USDT
-              remaining out of a {` ${formatEther2(warning.incomeLimit)} USDT`}
-              income limit.
-            </span>
-            <small>
-              Please prepare your next package activation. Do not activate a new
-              package or withdraw a partial amount when the remaining income is
-              below the withdrawal minimum. Wait for this income cycle to complete,
-              withdraw the full available income, then activate a new package.
-            </small>
+          <div
+            className={`package-warning${warning.completed ? " package-warning-critical" : ""}`}
+            key="combined-income-limit"
+            role={warning.completed ? "alert" : "status"}
+          >
+            <strong>{warning.completed ? "Income Limit Completed" : warning.willComplete ? "Income Limit Will Complete on Claim" : "Package Nearing Completion"}</strong>
+            {warning.completed ? (
+              <>
+                <span>
+                  {warning.inactive
+                    ? `Your ${formatEther2(warning.packageAmount)} USDT package income limit is complete and the package is inactive.`
+                    : `Your combined income limit of ${formatEther2(warning.incomeLimit)} USDT is complete.`}
+                </span>
+                <small>
+                  {warning.inactive
+                    ? "Any old or pending income from this completed package will be recorded as Flush when claimed. Activate a new package to earn again."
+                    : "Any further income will be recorded as Flush when the related income is claimed."}
+                </small>
+              </>
+            ) : (
+              <>
+                {/* <span>
+                  Claimed + current ready income: {formatEther2(warning.projectedUsed)} / {formatEther2(warning.incomeLimit)} USDT.
+                  {` ${formatEther2(warning.remaining)} USDT`} remains before the income limit.
+                </span> */}
+                <small>
+                  {warning.willComplete
+                    ? "Current ready income will complete this limit. Any amount above the remaining limit will be recorded as Flush when claimed."
+                    : "This includes Direct, Self ROI, Level ROI, Power and Reward income that is already ready to claim."}
+                </small>
+              </>
+            )}
           </div>
         ))}
         {purchaseSafety.blocked && (
@@ -689,9 +854,6 @@ const DashboardTop = () => {
           <span>{planActivity.progressText}</span>
         </h3>
         <p className="small-title">{planActivity.activeStakeLabel}</p>
-        {planActivity.selfRoiReadyLabel && (
-          <p className="small-title plan-self-roi-ready">{planActivity.selfRoiReadyLabel}</p>
-        )}
 
         {/*
         <div className="timer">
