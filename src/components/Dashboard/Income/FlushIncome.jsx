@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2FlushLedgerABI from "../../../blockchain/v2FlushLedgerABI";
 import { V2FlushLedgerAddress } from "../../../blockchain/address";
+import { BSC_TESTNET } from "../../../blockchain/bscTestnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
@@ -14,6 +15,12 @@ const formatAmount = (value) => {
 const formatTime = (value) => {
   const time = Number(value ?? 0n);
   return time ? new Date(time * 1000).toLocaleString() : "-";
+};
+
+const createBackupReadProvider = () => {
+  const request = new ethers.FetchRequest(BSC_TESTNET.rpcUrls[1]);
+  request.timeout = 20_000;
+  return new ethers.JsonRpcProvider(request, BSC_TESTNET.chainId, { staticNetwork: true });
 };
 
 export const FlushIncome = () => {
@@ -28,12 +35,29 @@ export const FlushIncome = () => {
       setMessage("");
       const user = await getReadWalletAddress();
       if (!user || !ethers.isAddress(user)) throw new Error("Please connect your wallet.");
-      const flushLedger = new ethers.Contract(V2FlushLedgerAddress, V2FlushLedgerABI, createBscReadProvider());
-      const totals = await Promise.all(labels.map((_, type) => flushLedger.totalFlushedIncome(user, type)));
-      const length = Number(await flushLedger.getFlushHistoryLength(user));
-      const records = await Promise.all(
-        Array.from({ length }, (_, position) => flushLedger.getFlushHistoryAt(user, length - position - 1)),
-      );
+
+      // Public Testnet RPCs can intermittently time out. Read the complete
+      // snapshot from the primary provider, then retry once on backup RPC.
+      const readSnapshot = async (provider) => {
+        const flushLedger = new ethers.Contract(V2FlushLedgerAddress, V2FlushLedgerABI, provider);
+        const [totals, historyLength] = await Promise.all([
+          Promise.all(labels.map((_, type) => flushLedger.totalFlushedIncome(user, type))),
+          flushLedger.getFlushHistoryLength(user),
+        ]);
+        const length = Number(historyLength);
+        const records = await Promise.all(
+          Array.from({ length }, (_, position) => flushLedger.getFlushHistoryAt(user, length - position - 1)),
+        );
+        return { totals, records };
+      };
+
+      let snapshot;
+      try {
+        snapshot = await readSnapshot(createBscReadProvider());
+      } catch (error) {
+        snapshot = await readSnapshot(createBackupReadProvider());
+      }
+      const { totals, records } = snapshot;
 
       setSummary(totals.map(formatAmount));
       setRows(records.map((record, index) => ({
@@ -43,9 +67,9 @@ export const FlushIncome = () => {
         time: formatTime(record.timestamp),
       })));
     } catch (error) {
-      setRows([]);
-      setSummary(["0.0000", "0.0000", "0.0000", "0.0000", "0.0000"]);
-      setMessage(error?.shortMessage || error?.message || "Could not load V2 Flush history.");
+      // Preserve a successful snapshot instead of making the UI appear to
+      // lose data when a later background/manual RPC refresh times out.
+      setMessage(error?.shortMessage || error?.message || "Could not refresh V2 Flush history. Please try Refresh again.");
     } finally {
       setLoading(false);
     }

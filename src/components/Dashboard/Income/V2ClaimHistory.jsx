@@ -16,6 +16,7 @@ const eventIncomeType = {
 };
 
 const incomeName = ["Direct Income", "Self ROI", "Level ROI", "Power Income", "Reward Income"];
+const summaryLabels = ["Direct Claimed", "Self ROI Claimed", "Level ROI Claimed", "Power Claimed", "Reward Claimed"];
 
 const formatAmount = (amount) => {
   try {
@@ -30,6 +31,7 @@ const formatAmount = (amount) => {
 
 export default function V2ClaimHistory({ eventName = "", heading = "V2 Claim History" }) {
   const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(["0.0000", "0.0000", "0.0000", "0.0000", "0.0000"]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -68,6 +70,12 @@ export default function V2ClaimHistory({ eventName = "", heading = "V2 Claim His
         }
       }
 
+      const totals = records.reduce((allTotals, record) => {
+        const type = Number(record.incomeType);
+        if (type >= 0 && type < allTotals.length) allTotals[type] += BigInt(record.amount ?? 0n);
+        return allTotals;
+      }, [0n, 0n, 0n, 0n, 0n]);
+      setSummary(totals.map(formatAmount));
       setRows(records.map((record, index) => ({
         sno: index + 1,
         incomeType: incomeName[Number(record.incomeType)] || "Unknown",
@@ -79,6 +87,7 @@ export default function V2ClaimHistory({ eventName = "", heading = "V2 Claim His
       if (records.length === 0) setMessage("No V2 claim history found.");
     } catch (error) {
       setRows([]);
+      setSummary(["0.0000", "0.0000", "0.0000", "0.0000", "0.0000"]);
       setMessage(error?.shortMessage || "Unable to load V2 claim history.");
     } finally {
       setLoading(false);
@@ -99,6 +108,14 @@ export default function V2ClaimHistory({ eventName = "", heading = "V2 Claim His
   return (
     <div className="page-container">
       <h1>{heading}</h1>
+      <div className="withdrawal-grid mb-4">
+        {summaryLabels.map((label, index) => (
+          <div className="withdrawal-card" key={label}>
+            <p className="withdrawal-card-title">{label}</p>
+            <h4 className="withdrawal-card-value">{summary[index]} USDT</h4>
+          </div>
+        ))}
+      </div>
       <div className="table-wrapper">
         <div className="table-card">
           <button className="btn btn-primary mb-3" onClick={loadHistory} disabled={loading}>
