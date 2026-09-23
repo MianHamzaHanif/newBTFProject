@@ -163,8 +163,8 @@ export const Activation = () => {
             <h4 className="withdrawal-card-value">{summary.roiPrincipal}</h4>
           </div>
           <div className="withdrawal-card">
-            <p className="withdrawal-card-title">Active Package</p>
-            <h4 className="withdrawal-card-value">{summary.currentPackage}</h4>
+            <p className="withdrawal-card-title">Total Packages (Active + Inactive)</p>
+            <h4 className="withdrawal-card-value">{summary.totalPackages}</h4>
           </div>
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Self ROI Claimable</p>
@@ -177,10 +177,6 @@ export const Activation = () => {
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Overall Income Claim Limit</p>
             <h4 className="withdrawal-card-value">{summary.totalIncomeLimit}</h4>
-          </div>
-          <div className="withdrawal-card">
-            <p className="withdrawal-card-title">Total Package Value Purchased</p>
-            <h4 className="withdrawal-card-value">{summary.totalPackages}</h4>
           </div>
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">ROI Day</p>
