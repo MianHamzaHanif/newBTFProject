@@ -71,7 +71,6 @@ export default function V2ClaimHistory({ eventName = "", heading = "V2 Claim His
       setRows(records.map((record, index) => ({
         sno: index + 1,
         incomeType: incomeName[Number(record.incomeType)] || "Unknown",
-        level: Number(record.level) ? `Level ${record.level}` : "-",
         amount: formatAmount(record.amount),
         timestamp: Number(record.timestamp)
           ? new Date(Number(record.timestamp) * 1000).toLocaleString()
@@ -93,7 +92,6 @@ export default function V2ClaimHistory({ eventName = "", heading = "V2 Claim His
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "incomeType", label: "Income Type", sortable: true },
-    { id: "level", label: "Level", sortable: true },
     { id: "amount", label: "Claimed USDT", sortable: true },
     { id: "timestamp", label: "Claim Time", sortable: true }
   ];
@@ -114,7 +112,6 @@ export default function V2ClaimHistory({ eventName = "", heading = "V2 Claim His
               <>
                 <TableCell align="center">{row.sno}</TableCell>
                 <TableCell align="center">{row.incomeType}</TableCell>
-                <TableCell align="center">{row.level}</TableCell>
                 <TableCell align="center">{row.amount}</TableCell>
                 <TableCell align="center" className="team-time-cell">{row.timestamp}</TableCell>
               </>
