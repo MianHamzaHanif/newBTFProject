@@ -18,6 +18,15 @@ const formatUsdt = (value) => {
   }
 };
 
+const incomeLimitForPackage = (amount) => {
+  const packageAmount = BigInt(amount ?? 0n);
+  if (packageAmount === ethers.parseEther("25")) return ethers.parseEther("75");
+  if (packageAmount === ethers.parseEther("100")) return ethers.parseEther("500");
+  if (packageAmount === ethers.parseEther("500")) return ethers.parseEther("3500");
+  if (packageAmount === ethers.parseEther("1000")) return ethers.parseEther("10000");
+  return 0n;
+};
+
 export const Activation = () => {
   const [rows, setRows] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -47,7 +56,7 @@ export const Activation = () => {
           V2PackageManagerABI,
           provider
         );
-        const [currentPackage, totalPackages, totalSpent, roiPrincipal, roiMaximum, roiGenerated, pendingRoi, roiDay, totalIncomeLimit] =
+        const [currentPackage, totalPackages, totalSpent, roiPrincipal, roiMaximum, roiGenerated, pendingRoi, roiDay] =
           await Promise.all([
             packageManager.currentPackage(user),
             packageManager.totalPackageValue(user),
@@ -56,8 +65,7 @@ export const Activation = () => {
             packageManager.selfRoiMaximum(user),
             packageManager.selfRoiGenerated(user),
             packageManager.pendingSelfRoi(user),
-            packageManager.ROI_DAY(),
-            packageManager.totalIncomeLimit(user)
+            packageManager.ROI_DAY()
           ]);
 
         if (totalPackages === 0n) {
@@ -68,9 +76,20 @@ export const Activation = () => {
         }
 
         const historyLength = Number(await packageManager.getPackageHistoryLength(user));
-        const rowsWithTime = await Promise.all(
+        const packageRecords = await Promise.all(
           Array.from({ length: historyLength }, async (_, index) => {
-            const record = await packageManager.getPackageHistoryAt(user, index);
+            return packageManager.getPackageHistoryAt(user, index);
+          })
+        );
+        const allPackagesIncomeLimit = packageRecords.reduce(
+          (total, record) => total + incomeLimitForPackage(record.amount),
+          0n,
+        );
+        const activePackagesIncomeLimit = packageRecords.reduce(
+          (total, record) => record.active ? total + incomeLimitForPackage(record.amount) : total,
+          0n,
+        );
+        const rowsWithTime = packageRecords.map((record, index) => {
             const replacedByNewerPackage = !record.active && index < historyLength - 1;
             return {
               sno: index + 1,
@@ -85,8 +104,7 @@ export const Activation = () => {
                   : "Inactive - Package Limit Completed",
               roiStatus: record.active ? "Yes" : "No"
             };
-          })
-        );
+          });
         /* Legacy event-log history is intentionally disabled. Public BSC
            Testnet RPC nodes can reject eth_getLogs with coalesce errors. */
         /*
@@ -121,14 +139,15 @@ export const Activation = () => {
 
         */
         setSummary({
-          roiPrincipal: formatUsdt(roiPrincipal),
-          currentPackage: formatUsdt(currentPackage),
+          totalRoiPackageAmount: formatUsdt(totalPackages),
+          activePackagesAmount: formatUsdt(roiPrincipal),
           totalPackages: formatUsdt(totalPackages),
           totalSpent: formatUsdt(totalSpent),
           roiMaximum: formatUsdt(roiMaximum),
           roiGenerated: formatUsdt(roiGenerated),
           pendingRoi: formatUsdt(pendingRoi),
-          totalIncomeLimit: formatUsdt(totalIncomeLimit),
+          allPackagesIncomeLimit: formatUsdt(allPackagesIncomeLimit),
+          activePackagesIncomeLimit: formatUsdt(activePackagesIncomeLimit),
           roiDay: `${Number(roiDay) / 60} minutes`
         });
         setRows(rowsWithTime);
@@ -160,11 +179,11 @@ export const Activation = () => {
         <div className="withdrawal-grid mb-4">
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Total Amount Receiving Self ROI</p>
-            <h4 className="withdrawal-card-value">{summary.roiPrincipal}</h4>
+            <h4 className="withdrawal-card-value">{summary.totalRoiPackageAmount}</h4>
           </div>
           <div className="withdrawal-card">
-            <p className="withdrawal-card-title">Total Packages (Active + Inactive)</p>
-            <h4 className="withdrawal-card-value">{summary.totalPackages}</h4>
+            <p className="withdrawal-card-title">Active Packages Total</p>
+            <h4 className="withdrawal-card-value">{summary.activePackagesAmount}</h4>
           </div>
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Self ROI Claimable</p>
@@ -175,8 +194,12 @@ export const Activation = () => {
             <h4 className="withdrawal-card-value">{summary.roiMaximum}</h4>
           </div>
           <div className="withdrawal-card">
-            <p className="withdrawal-card-title">Overall Income Claim Limit</p>
-            <h4 className="withdrawal-card-value">{summary.totalIncomeLimit}</h4>
+            <p className="withdrawal-card-title">Overall Income Claim Limit (All Packages)</p>
+            <h4 className="withdrawal-card-value">{summary.allPackagesIncomeLimit}</h4>
+          </div>
+          <div className="withdrawal-card">
+            <p className="withdrawal-card-title">Active Income Claim Limit</p>
+            <h4 className="withdrawal-card-value">{summary.activePackagesIncomeLimit}</h4>
           </div>
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">ROI Day</p>
