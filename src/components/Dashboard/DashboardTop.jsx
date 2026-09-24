@@ -27,6 +27,9 @@ const DashboardTop = () => {
     "100",
     "500",
     "1000",
+    "10000",
+    "50000",
+    "100000",
   ]);
   const [isBuying, setIsBuying] = useState(false);
   const [buyStatus, setBuyStatus] = useState("");

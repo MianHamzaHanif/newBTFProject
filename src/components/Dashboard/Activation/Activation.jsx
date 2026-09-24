@@ -24,6 +24,9 @@ const incomeLimitForPackage = (amount) => {
   if (packageAmount === ethers.parseEther("100")) return ethers.parseEther("500");
   if (packageAmount === ethers.parseEther("500")) return ethers.parseEther("3500");
   if (packageAmount === ethers.parseEther("1000")) return ethers.parseEther("10000");
+  if (packageAmount === ethers.parseEther("10000")) return ethers.parseEther("100000");
+  if (packageAmount === ethers.parseEther("50000")) return ethers.parseEther("500000");
+  if (packageAmount === ethers.parseEther("100000")) return ethers.parseEther("1000000");
   return 0n;
 };
 
