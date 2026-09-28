@@ -9,7 +9,8 @@ import {
   HasTestUsdtFaucet,
   PackageManagerAddress,
   TokenAddress,
-  V2LedgerAddress
+  V2LedgerAddress,
+  V2LegacyRankCheckpointAddress
 } from "../../../blockchain/address";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscTestnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
@@ -21,6 +22,9 @@ const claimActions = [
   { method: "claimLevelRoi", incomeType: 2, label: "Level ROI" },
   { method: "claimPowerIncome", incomeType: 3, label: "Power Income" },
   { method: "claimRewardIncome", incomeType: 4, label: "Reward Income" }
+];
+const RANK_CHECKPOINT_READ_ABI = [
+  "function getPowerSchedule(address) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)"
 ];
 
 const formatAmount = (amount) => {
@@ -87,6 +91,7 @@ export default function V2ClaimIncome() {
       );
       const readProvider = createBscReadProvider();
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
+      const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, readProvider);
       const nextRows = await Promise.all(
         claimActions.map(async (action, index) => {
           let currentAmount = 0n;
@@ -96,6 +101,14 @@ export default function V2ClaimIncome() {
             // Raw ready income is displayed independently. The shared package
             // cap is enforced only when the user presses Claim.
             currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
+
+            // The legacy checkpoint keeps a verified V1 remainder until the
+            // user claims Power. It is intentionally not stored in Manager's
+            // pending mapping before that claim, so include it in the UI view.
+            if (action.incomeType === 3) {
+              const schedule = await checkpoint.getPowerSchedule(wallet);
+              if (schedule.set) currentAmount += schedule.unpaidAmount;
+            }
 
             // Show the raw accrued amount for every income type. The shared
             // package cap is intentionally applied only when Claim is sent;

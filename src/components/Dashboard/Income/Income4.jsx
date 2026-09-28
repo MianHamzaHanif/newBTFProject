@@ -4,7 +4,7 @@ import { TableCell } from "@mui/material";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import { PackageManagerAddress, ReferralNetworkAddress } from "../../../blockchain/address";
+import { PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
 import {
   createBscReadProvider,
   getReadWalletAddress,
@@ -26,6 +26,9 @@ const formatTime = (value) => {
   if (!timestamp) return "-";
   return new Date(timestamp * 1000).toLocaleString();
 };
+const RANK_CHECKPOINT_READ_ABI = [
+  "function getPowerSchedule(address) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)"
+];
 
 const card = (title, value, note = "") => (
   <div className="withdrawal-card">
@@ -42,6 +45,7 @@ export const Income4 = () => {
   const [registryAchievementAt, setRegistryAchievementAt] = useState(0n);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [legacyPower, setLegacyPower] = useState(null);
 
   const loadPowerDetails = useCallback(async () => {
     setLoading(true);
@@ -75,6 +79,7 @@ export const Income4 = () => {
         V2ReferralRegistryABI,
         provider,
       );
+      const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, provider);
       const powerLevel = Number(powerDetails.activeLevel || powerDetails.achievedLevel || 0n);
       const achievedAt = powerLevel
         ? await registry.powerAchievedAt(user, powerLevel)
@@ -102,7 +107,9 @@ export const Income4 = () => {
         }),
       );
 
+      const legacySchedule = await checkpoint.getPowerSchedule(user);
       setDetails(powerDetails);
+      setLegacyPower(legacySchedule.set ? legacySchedule : null);
       setLevelDetails(levels);
       setPowerTiming({ now: BigInt(latestBlock?.timestamp ?? 0), roiDay: BigInt(roiDay ?? 120n) });
       setRegistryAchievementAt(achievedAt);
@@ -111,6 +118,7 @@ export const Income4 = () => {
       setLevelDetails([]);
       setPowerTiming({ now: 0n, roiDay: 120n });
       setRegistryAchievementAt(0n);
+      setLegacyPower(null);
       setMessage(error?.shortMessage || error?.message || "Could not load Power details");
     } finally {
       setLoading(false);
@@ -126,7 +134,8 @@ export const Income4 = () => {
   const nextLevel = Number(details?.nextLevel ?? 0n);
   const qualified = formatUsdt(details?.nextQualifiedBusiness);
   const required = formatUsdt(details?.nextRequiredBusiness);
-  const powerTime = BigInt(details?.activatedAt ?? 0n) || registryAchievementAt;
+  const powerTime = BigInt(legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt;
+  const powerClaimable = BigInt(details?.claimableAmount ?? 0n) + BigInt(legacyPower?.unpaidAmount ?? 0n);
   const historyColumns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "level", label: "Power Level", sortable: true },
@@ -170,9 +179,10 @@ export const Income4 = () => {
         {card("Total Power Income Claimed", formatUsdt(details?.totalClaimed))}
         {card(
           "Power Income Claimable",
-          formatUsdt(details?.claimableAmount),
+          formatUsdt(powerClaimable),
           `Released: ${Number(details?.releasedCount ?? 0n)} | Claimed: ${Number(details?.claimedCount ?? 0n)}`,
         )}
+        {legacyPower ? card("V1 Pending Power (Migrated)", formatUsdt(legacyPower.unpaidAmount), `P${legacyPower.level} | Paid: ${legacyPower.paidInstallments}`) : null}
         {card("Power Last Claim At", formatTime(details?.lastClaimAt))}
         {card("Next Achieve Power", nextLevel ? `P${nextLevel}` : "Max achieved")}
         {card(
@@ -180,7 +190,7 @@ export const Income4 = () => {
           required,
           `Qualified business: ${qualified}`,
         )}
-        {card("Next Power Payout At", formatTime(details?.nextPayoutAt))}
+        {card("Next Power Payout At", formatTime(legacyPower?.nextInstallmentAt ?? details?.nextPayoutAt))}
       </div>
 
       {message ? <p className="text-danger">{message}</p> : null}
