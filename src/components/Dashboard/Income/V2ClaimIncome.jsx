@@ -97,19 +97,10 @@ export default function V2ClaimIncome() {
             // cap is enforced only when the user presses Claim.
             currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
 
-            // Legacy V1 Power/Reward checkpoints are released by the Manager
-            // only when a claim is made. The generic lens cannot read that
-            // stateful checkpoint, so preview the exact transaction using an
-            // eth_call. No state is changed and the result matches Claim.
-            if (action.incomeType === 3 || action.incomeType === 4) {
-              const data = packageManager.interface.encodeFunctionData(action.method);
-              const result = await readProvider.call({
-                to: PackageManagerAddress,
-                from: wallet,
-                data
-              });
-              currentAmount = packageManager.interface.decodeFunctionResult(action.method, result)[0];
-            }
+            // Show the raw accrued amount for every income type. The shared
+            // package cap is intentionally applied only when Claim is sent;
+            // therefore a visible Power/Reward amount can still Flush if the
+            // user has no remaining package-income capacity.
           } catch {
             currentAmount = 0n;
           }
