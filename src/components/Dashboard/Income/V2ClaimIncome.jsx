@@ -85,7 +85,8 @@ export default function V2ClaimIncome() {
         V2PackageManagerABI,
         createBscReadProvider()
       );
-      const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, createBscReadProvider());
+      const readProvider = createBscReadProvider();
+      const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
       const nextRows = await Promise.all(
         claimActions.map(async (action, index) => {
           let currentAmount = 0n;
@@ -95,6 +96,20 @@ export default function V2ClaimIncome() {
             // Raw ready income is displayed independently. The shared package
             // cap is enforced only when the user presses Claim.
             currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
+
+            // Legacy V1 Power/Reward checkpoints are released by the Manager
+            // only when a claim is made. The generic lens cannot read that
+            // stateful checkpoint, so preview the exact transaction using an
+            // eth_call. No state is changed and the result matches Claim.
+            if (action.incomeType === 3 || action.incomeType === 4) {
+              const data = packageManager.interface.encodeFunctionData(action.method);
+              const result = await readProvider.call({
+                to: PackageManagerAddress,
+                from: wallet,
+                data
+              });
+              currentAmount = packageManager.interface.decodeFunctionResult(action.method, result)[0];
+            }
           } catch {
             currentAmount = 0n;
           }
