@@ -2,11 +2,12 @@
 // .env.local after a successful deployment. The fallbacks keep the deployed
 // Vercel UI functional if its build-time VITE variables are missing or stale.
 export const TokenAddress = import.meta.env.VITE_BTF_TESTNET_USDT_ADDRESS || "0xb602A2B700ba8bF788F06cC461EC8Fb1635e244D";
-export const ReferralNetworkAddress = import.meta.env.VITE_BTF_V2_REGISTRY_ADDRESS || "0xF96018675E91B23B77B9Be8929e28C7D380D5459";
-export const PackageManagerAddress = import.meta.env.VITE_BTF_V2_PACKAGE_MANAGER_ADDRESS || "0x4066457b79c782d8668Cc42E3558D036887BeCbf";
-export const V2DeploymentBlock = import.meta.env.VITE_BTF_V2_DEPLOYMENT_BLOCK || "133693013";
-export const V2LedgerAddress = import.meta.env.VITE_BTF_V2_LEDGER_ADDRESS || "0xdF2fFCC3982f81e4b87bD0DCF2BCAbdF9e45C497";
-export const V2FlushLedgerAddress = import.meta.env.VITE_BTF_V2_FLUSH_LEDGER_ADDRESS || "0x316F072b0a725a98Bf56dc3Fa7F08A0e509c398b";
+export const ReferralNetworkAddress = import.meta.env.VITE_BTF_V2_REGISTRY_ADDRESS || "0x0a7a84485A8EAc887775A17d80f2b5D8c104c8DB";
+export const PackageManagerAddress = import.meta.env.VITE_BTF_V2_PACKAGE_MANAGER_ADDRESS || "0x330cbC0ed37359181EF79D7c4535120dE538Aed1";
+export const V2DeploymentBlock = import.meta.env.VITE_BTF_V2_DEPLOYMENT_BLOCK || "133703977";
+export const V2LedgerAddress = import.meta.env.VITE_BTF_V2_LEDGER_ADDRESS || "0x80A2Ffafd2d1dC8C19787100EAC7d9bFE7733691";
+export const V2FlushLedgerAddress = import.meta.env.VITE_BTF_V2_FLUSH_LEDGER_ADDRESS || "0xc3CcF77f8603afd14DA7a4076e17e6c15a571167";
+export const V2ManualLegacyImporterAddress = import.meta.env.VITE_BTF_V2_MANUAL_LEGACY_IMPORTER_ADDRESS || "0x7cBeac3320cBcD092Ef3ddB7EA14668C7eCC2265";
 export const HasTestUsdtFaucet = import.meta.env.VITE_BTF_TEST_USDT_FAUCET === "true";
 
 // These old modules do not exist in V2 yet. They remain blank deliberately.

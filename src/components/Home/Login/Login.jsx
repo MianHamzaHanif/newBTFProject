@@ -365,6 +365,11 @@ const Login = () => {
                 {isRegistering ? "Registering..." : "Register"}
               </button>
               )}
+              {registrationStatus === "unregistered" && (
+                <button className="disconnect-btn" onClick={() => navigate("/migration-data")}>
+                  View Migration Data
+                </button>
+              )}
               {registerMessage.text && (
                 <p className={`register-message ${registerMessage.type}`}>
                   {registerMessage.text}

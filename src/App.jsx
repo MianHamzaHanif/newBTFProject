@@ -22,6 +22,7 @@ import {
   MyTeam,
   Withdrawal,
   WithdrawalHistory,
+  MigrationData,
 } from "./pages";
 import Home from "./pages/Home";
 import Login from "./components/Home/Login/Login";
@@ -54,6 +55,7 @@ const App = () => {
         "/income/",
         "/withdrawal",
         "/withdrawal-history",
+        "/migration-data",
         "/lock",
         "/owner-lock",
         "/profile",
@@ -116,6 +118,11 @@ const App = () => {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/welcomePage" element={<WelcomePage />} />
       <Route path="/alert" element={<Alert />} />
+      {/* Migration must also be available to an authorised operator wallet that
+          is not itself a V2 member. The screen performs its own V2 checks. */}
+      <Route element={<DashboardLayout />}>
+        <Route path="/migration-data" element={<MigrationData />} />
+      </Route>
       <Route element={<RequireV2Registration />}>
       <Route element={<DashboardLayout />}>
         <Route path="/dashboard" element={<Dashboard />} />

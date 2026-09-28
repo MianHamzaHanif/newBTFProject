@@ -15,3 +15,4 @@ export { Lock } from "../components/Dashboard/Lock/Lock";
 export { OwnerLock } from "../components/Dashboard/Lock/OwnerLock";
 export { Withdrawal } from "../components/Dashboard/Withdrawal/Withdrawa";
 export { WithdrawalHistory } from "../components/Dashboard/Withdrawal/WithdrawalHistory";
+export { default as MigrationData } from "../components/Dashboard/Migration/MigrationData";
