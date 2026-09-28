@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
+import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscTestnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
@@ -18,10 +19,26 @@ const formatUsdt = (value) => {
 
 const shortAddress = (value) => `${value.slice(0, 6)}...${value.slice(-4)}`;
 
+async function ensureBscTestnet() {
+  const chainId = await window.ethereum.request({ method: "eth_chainId" });
+  if (BigInt(chainId) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
+  try {
+    await window.ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: WALLET_ADD_CHAIN_PARAMS.chainId }],
+    });
+  } catch (error) {
+    if (error?.code !== 4902) throw error;
+    await window.ethereum.request({ method: "wallet_addEthereumChain", params: [WALLET_ADD_CHAIN_PARAMS] });
+  }
+}
+
 export const PowerIncomeWithdraw = () => {
   const [summary, setSummary] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncPageSize, setSyncPageSize] = useState(50);
   const [message, setMessage] = useState("");
 
   const loadPowerIncome = useCallback(async () => {
@@ -57,11 +74,14 @@ export const PowerIncomeWithdraw = () => {
       );
       const directRows = await Promise.all(
         directAddresses.map(async (direct, index) => {
-          const [business, qualified] = await Promise.all([
+          const [business, qualified, legacyCounted, everPackage] = await Promise.all([
             registry.legBusiness(user, direct),
             registry.hasQualifiedPackage(direct),
+            registry.legacyDirectCounted(direct).catch(() => false),
+            registry.hasEverPackage(direct).catch(() => true),
           ]);
-          const counted = qualified && nextLevel
+          const eligible = legacyCounted || everPackage;
+          const counted = nextLevel && eligible
             ? (business > capPerLeg ? capPerLeg : business)
             : 0n;
           return {
@@ -69,7 +89,7 @@ export const PowerIncomeWithdraw = () => {
             direct: shortAddress(direct),
             business: formatUsdt(business),
             counted: formatUsdt(counted),
-            status: qualified ? "Qualified" : "No package",
+            status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package",
           };
         }),
       );
@@ -84,6 +104,44 @@ export const PowerIncomeWithdraw = () => {
       setLoading(false);
     }
   }, []);
+
+  const syncNextPowerReward = async () => {
+    if (!window.ethereum) {
+      setMessage("MetaMask or Trust Wallet is not available.");
+      return;
+    }
+    try {
+      setSyncing(true);
+      setMessage("Confirm the Power/Reward update transaction in your wallet.");
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      await ensureBscTestnet();
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const user = await signer.getAddress();
+      const registry = new ethers.Contract(ReferralNetworkAddress, V2ReferralRegistryABI, signer);
+      const tx = await registry.syncMyNextPowerReward(syncPageSize);
+      setMessage("Power/Reward update submitted. Waiting for confirmation...");
+      await tx.wait();
+      const [progress, total] = await Promise.all([
+        registry.getPowerRewardSync(user),
+        registry.getLevelUsersLength(user, 0),
+      ]);
+      setMessage(progress.active
+        ? `Saved ${progress.cursor.toString()} of ${total.toString()} direct legs. Click Update again to continue.`
+        : "Next Power and Reward ranks have been checked successfully.");
+      window.dispatchEvent(new Event("btf:v2-data-changed"));
+      await loadPowerIncome();
+    } catch (error) {
+      const reason = error?.shortMessage || error?.message || "";
+      setMessage(reason.includes("LEGACY_LEGS")
+        ? "Owner must finish importing your V1 direct-leg business before Power/Reward update."
+        : reason.includes("OWN_PACKAGE")
+          ? "An own package is required before Power/Reward rank update."
+          : reason || "Could not update Power/Reward ranks.");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
     loadPowerIncome();
@@ -103,6 +161,19 @@ export const PowerIncomeWithdraw = () => {
         <h1 className="mb-0">Power Income</h1>
         <button className="btn btn-outline-primary" onClick={loadPowerIncome} disabled={loading}>
           {loading ? "Loading..." : "Refresh"}
+        </button>
+        <select
+          className="form-select d-inline-block ms-2"
+          style={{ width: "auto" }}
+          value={syncPageSize}
+          onChange={(event) => setSyncPageSize(Number(event.target.value))}
+          disabled={syncing}
+          aria-label="Direct legs per Power and Reward update"
+        >
+          {[5, 10, 20, 30, 50, 100, 200, 500, 1000].map((size) => <option key={size} value={size}>{size} legs</option>)}
+        </select>
+        <button className="btn btn-primary ms-2" onClick={syncNextPowerReward} disabled={syncing}>
+          {syncing ? "Updating..." : `Update Next Power & Reward (${syncPageSize} Legs)`}
         </button>
       </div>
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>

@@ -55,9 +55,10 @@ export const Income6 = () => {
         if (!user || !ethers.isAddress(user)) return;
         const provider = createBscReadProvider();
         const manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
+        const incomeLens = new ethers.Contract(await manager.incomeReadyLens(), V2PackageManagerABI, provider);
         const registry = new ethers.Contract(ReferralNetworkAddress, V2ReferralRegistryABI, provider);
         const [countRaw, rewardReady, roiDayRaw] = await Promise.all([
-          registry.getAchievedRewardCount(user), manager.getIncomeReady(user, 4), manager.ROI_DAY(),
+          registry.getAchievedRewardCount(user), incomeLens.getIncomeReady(user, 4), manager.ROI_DAY(),
         ]);
         const roiDaySeconds = BigInt(roiDayRaw || ROI_DAY_SECONDS);
         const count = Number(countRaw);

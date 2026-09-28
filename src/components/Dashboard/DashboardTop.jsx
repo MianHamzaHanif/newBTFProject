@@ -27,9 +27,6 @@ const DashboardTop = () => {
     "100",
     "500",
     "1000",
-    "10000",
-    "50000",
-    "100000",
   ]);
   const [isBuying, setIsBuying] = useState(false);
   const [buyStatus, setBuyStatus] = useState("");
@@ -118,17 +115,18 @@ const DashboardTop = () => {
       if (!wallet || !ethers.isAddress(wallet)) throw new Error("WALLET");
       const v2Provider = createBscReadProvider();
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
+      const v2Lens = new ethers.Contract(await v2Manager.incomeReadyLens(), V2PackageManagerABI, v2Provider);
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
       const [currentPackage, totalIncomeLimit, packageHistoryLength, incomeHistoryLength, directReady, selfRoiReady, levelRoiReady, powerReady, rewardReady, roiDayRaw, roiStartRaw] = await Promise.all([
         v2Manager.currentPackage(wallet),
         v2Manager.totalIncomeLimit(wallet),
         v2Manager.getPackageHistoryLength(wallet),
         v2Ledger.getUserIncomeHistoryLength(wallet),
-        v2Manager.getIncomeReady(wallet, 0),
-        v2Manager.getIncomeReady(wallet, 1),
-        v2Manager.getIncomeReady(wallet, 2),
-        v2Manager.getIncomeReady(wallet, 3),
-        v2Manager.getIncomeReady(wallet, 4),
+        v2Lens.getIncomeReady(wallet, 0),
+        v2Lens.getIncomeReady(wallet, 1),
+        v2Lens.getIncomeReady(wallet, 2),
+        v2Lens.getIncomeReady(wallet, 3),
+        v2Lens.getIncomeReady(wallet, 4),
         v2Manager.ROI_DAY(),
         v2Manager.roiStartTime(),
       ]);
@@ -366,16 +364,17 @@ const DashboardTop = () => {
       }
       const v2WarningProvider = createBscReadProvider();
       const v2WarningManager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2WarningProvider);
+      const v2WarningLens = new ethers.Contract(await v2WarningManager.incomeReadyLens(), V2PackageManagerABI, v2WarningProvider);
       const v2WarningLedger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2WarningProvider);
       const [limit, historyLengthRaw, incomeHistoryLengthRaw, directReady, selfRoiReady, levelRoiReady, powerReady, rewardReady] = await Promise.all([
         v2WarningManager.totalIncomeLimit(wallet),
         v2WarningManager.getPackageHistoryLength(wallet),
         v2WarningLedger.getUserIncomeHistoryLength(wallet),
-        v2WarningManager.getIncomeReady(wallet, 0),
-        v2WarningManager.getIncomeReady(wallet, 1),
-        v2WarningManager.getIncomeReady(wallet, 2),
-        v2WarningManager.getIncomeReady(wallet, 3),
-        v2WarningManager.getIncomeReady(wallet, 4),
+        v2WarningLens.getIncomeReady(wallet, 0),
+        v2WarningLens.getIncomeReady(wallet, 1),
+        v2WarningLens.getIncomeReady(wallet, 2),
+        v2WarningLens.getIncomeReady(wallet, 3),
+        v2WarningLens.getIncomeReady(wallet, 4),
       ]);
       const incomeLimit = BigInt(limit);
       const historyLength = Number(historyLengthRaw);

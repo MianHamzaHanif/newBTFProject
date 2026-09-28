@@ -37,7 +37,6 @@ const card = (title, value, note = "") => (
 
 export const Income4 = () => {
   const [details, setDetails] = useState(null);
-  const [history, setHistory] = useState([]);
   const [levelDetails, setLevelDetails] = useState([]);
   const [powerTiming, setPowerTiming] = useState({ now: 0n, roiDay: 120n });
   const [registryAchievementAt, setRegistryAchievementAt] = useState(0n);
@@ -60,9 +59,14 @@ export const Income4 = () => {
         V2PackageManagerABI,
         provider,
       );
+      const incomeLens = new ethers.Contract(
+        await manager.incomeReadyLens(),
+        V2PackageManagerABI,
+        provider,
+      );
 
       const [powerDetails, roiDay, latestBlock] = await Promise.all([
-        manager.getPowerDetails(user),
+        incomeLens.getPowerDetails(user),
         manager.ROI_DAY(),
         provider.getBlock("latest"),
       ]);
@@ -75,12 +79,6 @@ export const Income4 = () => {
       const achievedAt = powerLevel
         ? await registry.powerAchievedAt(user, powerLevel)
         : 0n;
-      const length = Number(await manager.getPowerClaimHistoryLength(user));
-      const records = await Promise.all(
-        Array.from({ length }, (_, position) =>
-          manager.getPowerClaimHistoryAt(user, length - position - 1),
-        ),
-      );
       const achievedPowerLevel = Number(powerDetails.achievedLevel ?? 0n);
       const levels = await Promise.all(
         Array.from({ length: achievedPowerLevel }, async (_, offset) => {
@@ -105,13 +103,11 @@ export const Income4 = () => {
       );
 
       setDetails(powerDetails);
-      setHistory(records);
       setLevelDetails(levels);
       setPowerTiming({ now: BigInt(latestBlock?.timestamp ?? 0), roiDay: BigInt(roiDay ?? 120n) });
       setRegistryAchievementAt(achievedAt);
     } catch (error) {
       setDetails(null);
-      setHistory([]);
       setLevelDetails([]);
       setPowerTiming({ now: 0n, roiDay: 120n });
       setRegistryAchievementAt(0n);
@@ -141,11 +137,7 @@ export const Income4 = () => {
     { id: "lastClaimAt", label: "Last Claim Time", sortable: true },
   ];
   const historyRows = levelDetails.map((item, index) => {
-    const levelClaims = history.filter((record) => Number(record.level) === item.level);
-    const lastClaim = levelClaims.reduce(
-      (latest, record) => (record.timestamp > latest ? record.timestamp : latest),
-      0n,
-    );
+    const lastClaim = details?.lastClaimAt ?? 0n;
     let releasedCount = Number(item.releasedCount);
     if (item.level === activeLevel && item.activatedAt && powerTiming.now >= item.activatedAt) {
       const virtualReleased = ((powerTiming.now - item.activatedAt) / (10n * powerTiming.roiDay)) + 1n;

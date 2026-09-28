@@ -24,9 +24,6 @@ const incomeLimitForPackage = (amount) => {
   if (packageAmount === ethers.parseEther("100")) return ethers.parseEther("500");
   if (packageAmount === ethers.parseEther("500")) return ethers.parseEther("3500");
   if (packageAmount === ethers.parseEther("1000")) return ethers.parseEther("10000");
-  if (packageAmount === ethers.parseEther("10000")) return ethers.parseEther("100000");
-  if (packageAmount === ethers.parseEther("50000")) return ethers.parseEther("500000");
-  if (packageAmount === ethers.parseEther("100000")) return ethers.parseEther("1000000");
   return 0n;
 };
 
@@ -94,6 +91,7 @@ export const Activation = () => {
         );
         const rowsWithTime = packageRecords.map((record, index) => {
             const replacedByNewerPackage = !record.active && index < historyLength - 1;
+            const selfRoiActive = record.active && record.roiGenerated < record.roiMaximum;
             return {
               sno: index + 1,
               packageAmount: formatUsdt(record.amount),
@@ -101,11 +99,11 @@ export const Activation = () => {
               roiGenerated: formatUsdt(record.roiGenerated),
               roiMaximum: formatUsdt(record.roiMaximum),
               status: record.active
-                ? "Active - ROI Running"
+                ? selfRoiActive ? "Active - ROI Running" : "Active - Self ROI Complete"
                 : replacedByNewerPackage
                   ? "Inactive - Newer Package Purchased"
                   : "Inactive - Package Limit Completed",
-              roiStatus: record.active ? "Yes" : "No"
+              roiStatus: selfRoiActive ? "Yes" : "No"
             };
           });
         /* Legacy event-log history is intentionally disabled. Public BSC

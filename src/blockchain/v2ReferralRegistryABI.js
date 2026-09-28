@@ -9,8 +9,16 @@ export default [
   "function rewardQualifiedBusiness(address user,uint256 index) view returns (uint256)",
   "function rewardThreshold(uint256 index) view returns (uint256)",
   "function rewardAchievedAt(address user,uint256 index) view returns (uint256)",
+  "function getPowerRewardSync(address user) view returns (uint256 powerLevel,uint256 rewardIndex,uint256 cursor,uint256 powerQualified,uint256 rewardQualified,bool active)",
+  "function syncMyNextPowerReward(uint256 maxDirects) returns (uint256 processedDirects,uint256 totalDirects,bool completed,uint256 powerLevel,uint256 rewardIndex)",
   "function getLevelUsersLength(address upline,uint256 level) view returns (uint256)",
   "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns (address)",
   "function legBusiness(address upline,address direct) view returns (uint256)",
-  "function hasQualifiedPackage(address user) view returns (bool)"
+  "function legacyLegBusiness(address upline,address direct) view returns (uint256)",
+  "function legacyLegsReady(address upline) view returns (bool)",
+  "function legacyLegImportCursor(address upline) view returns (uint256)",
+  "function importNextLegacyLegs(address upline,uint256 maxDirects) returns (uint256 processed,uint256 totalDirects,bool completed)",
+  "function hasQualifiedPackage(address user) view returns (bool)",
+  "function hasEverPackage(address user) view returns (bool)",
+  "function legacyDirectCounted(address user) view returns (bool)"
 ];

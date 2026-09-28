@@ -80,6 +80,11 @@ export default function V2ClaimIncome() {
         V2PackageManagerABI,
         createBscReadProvider()
       );
+      const incomeLens = new ethers.Contract(
+        await packageManager.incomeReadyLens(),
+        V2PackageManagerABI,
+        createBscReadProvider()
+      );
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, createBscReadProvider());
       const nextRows = await Promise.all(
         claimActions.map(async (action, index) => {
@@ -89,7 +94,7 @@ export default function V2ClaimIncome() {
           try {
             // Raw ready income is displayed independently. The shared package
             // cap is enforced only when the user presses Claim.
-            currentAmount = await packageManager.getIncomeReady(wallet, action.incomeType);
+            currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
           } catch {
             currentAmount = 0n;
           }
