@@ -35,7 +35,7 @@ export const Income5 = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [syncPageSize, setSyncPageSize] = useState(50);
+  const syncPageSize = 500;
   const [message, setMessage] = useState("");
 
   const loadRewardDetails = useCallback(async () => {
@@ -155,24 +155,16 @@ export const Income5 = () => {
 
   return (
     <div className="page-container">
-      <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
         <h1 className="mb-0">Reward Income</h1>
-        <button className="btn btn-outline-primary" onClick={loadRewardDetails} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
-        <select
-          className="form-select d-inline-block ms-2"
-          style={{ width: "auto" }}
-          value={syncPageSize}
-          onChange={(event) => setSyncPageSize(Number(event.target.value))}
-          disabled={syncing}
-          aria-label="Direct legs per Power and Reward update"
-        >
-          {[5, 10, 20, 30, 50, 100, 200, 500, 1000].map((size) => <option key={size} value={size}>{size} legs</option>)}
-        </select>
-        <button className="btn btn-primary ms-2" onClick={syncNextPowerReward} disabled={syncing}>
-          {syncing ? "Updating..." : `Update Next Power & Reward (${syncPageSize} Legs)`}
-        </button>
+        <div className="d-flex align-items-center gap-2">
+          <button className="btn btn-primary" onClick={syncNextPowerReward} disabled={syncing}>
+            {syncing ? "Updating ranks..." : "Update Power & Reward"}
+          </button>
+          <button className="btn btn-outline-primary" onClick={loadRewardDetails} disabled={loading || syncing}>
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
       </div>
 
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>

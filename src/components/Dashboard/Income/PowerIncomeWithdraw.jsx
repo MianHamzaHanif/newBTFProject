@@ -38,7 +38,7 @@ export const PowerIncomeWithdraw = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [syncPageSize, setSyncPageSize] = useState(50);
+  const syncPageSize = 500;
   const [message, setMessage] = useState("");
 
   const loadPowerIncome = useCallback(async () => {
@@ -53,15 +53,28 @@ export const PowerIncomeWithdraw = () => {
         V2ReferralRegistryABI,
         createBscReadProvider(),
       );
-      const achieved = Number(await registry.getAchievedPowerLevel(user));
+      const [achievedPowerRaw, achievedRewardRaw, directCount, syncState] = await Promise.all([
+        registry.getAchievedPowerLevel(user),
+        registry.getAchievedRewardCount(user),
+        registry.getLevelUsersLength(user, 0),
+        registry.getPowerRewardSync(user),
+      ]);
+      const achieved = Number(achievedPowerRaw);
+      const achievedReward = Number(achievedRewardRaw);
       const nextLevel = achieved < 9 ? achieved + 1 : 0;
-      const [qualifiedBusiness, requiredBusiness, directCount] = nextLevel
+      const nextReward = achievedReward < 12 ? achievedReward + 1 : 0;
+      const [qualifiedBusiness, requiredBusiness] = nextLevel
         ? await Promise.all([
             registry.powerQualifiedBusiness(user, nextLevel),
             registry.powerThreshold(nextLevel),
-            registry.getLevelUsersLength(user, 0),
           ])
-        : [0n, 0n, await registry.getLevelUsersLength(user, 0)];
+        : [0n, 0n];
+      const [rewardQualifiedBusiness, rewardRequiredBusiness] = nextReward
+        ? await Promise.all([
+            registry.rewardQualifiedBusiness(user, nextReward),
+            registry.rewardThreshold(nextReward),
+          ])
+        : [0n, 0n];
 
       const remaining = requiredBusiness > qualifiedBusiness
         ? requiredBusiness - qualifiedBusiness
@@ -94,7 +107,20 @@ export const PowerIncomeWithdraw = () => {
         }),
       );
 
-      setSummary({ achieved, nextLevel, qualifiedBusiness, requiredBusiness, remaining, capPerLeg });
+      setSummary({
+        achieved,
+        achievedReward,
+        nextLevel,
+        nextReward,
+        qualifiedBusiness,
+        requiredBusiness,
+        rewardQualifiedBusiness,
+        rewardRequiredBusiness,
+        remaining,
+        capPerLeg,
+        directCount,
+        syncState,
+      });
       setRows(directRows);
     } catch (error) {
       setSummary(null);
@@ -157,24 +183,19 @@ export const PowerIncomeWithdraw = () => {
 
   return (
     <div className="page-container">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h1 className="mb-0">Power Income</h1>
-        <button className="btn btn-outline-primary" onClick={loadPowerIncome} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
-        <select
-          className="form-select d-inline-block ms-2"
-          style={{ width: "auto" }}
-          value={syncPageSize}
-          onChange={(event) => setSyncPageSize(Number(event.target.value))}
-          disabled={syncing}
-          aria-label="Direct legs per Power and Reward update"
-        >
-          {[5, 10, 20, 30, 50, 100, 200, 500, 1000].map((size) => <option key={size} value={size}>{size} legs</option>)}
-        </select>
-        <button className="btn btn-primary ms-2" onClick={syncNextPowerReward} disabled={syncing}>
-          {syncing ? "Updating..." : `Update Next Power & Reward (${syncPageSize} Legs)`}
-        </button>
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+        <div>
+          <h1 className="mb-1">Power & Reward Rank Update</h1>
+          <p className="mb-0 text-light-emphasis">Scan direct-leg business in safe pages, then unlock the next eligible rank.</p>
+        </div>
+        <div className="d-flex flex-wrap align-items-center gap-2">
+          <button className="btn btn-primary" onClick={syncNextPowerReward} disabled={syncing}>
+            {syncing ? "Updating ranks..." : "Update Power & Reward"}
+          </button>
+          <button className="btn btn-outline-primary" onClick={loadPowerIncome} disabled={loading || syncing}>
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
       </div>
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Power</p><h4 className="withdrawal-card-value">{summary?.achieved ? `P${summary.achieved}` : "0"}</h4></div>
@@ -183,6 +204,12 @@ export const PowerIncomeWithdraw = () => {
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Business Remaining to Achieve</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.remaining)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Maximum Count from One Leg (40%)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.capPerLeg)} USDT</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achievedReward ? `R${summary.achievedReward}` : "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Next Reward</p><h4 className="withdrawal-card-value">{summary?.nextReward ? `R${summary.nextReward}` : "All achieved"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Reward)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.rewardQualifiedBusiness)} USDT</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Required Reward Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.rewardRequiredBusiness)} USDT</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Direct Legs</p><h4 className="withdrawal-card-value">{summary?.directCount?.toString?.() ?? "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Update Progress</p><h4 className="withdrawal-card-value">{summary?.syncState?.active ? `${summary.syncState.cursor.toString()} / ${summary.directCount?.toString?.()}` : "Ready"}</h4></div>
       </div>
       {message ? <p className="text-danger">{message}</p> : null}
       <h2 className="mb-3">Direct Leg Business Details</h2>
