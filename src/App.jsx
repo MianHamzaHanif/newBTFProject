@@ -80,18 +80,8 @@ const App = () => {
 
     window.ethereum.on("accountsChanged", handleAccountsChanged);
 
-    // Ethers binds an injected BrowserProvider to the chain it first sees.
-    // When a mobile wallet switches from Ethereum (1) to BSC (56), retaining
-    // that provider causes the "network changed: 1 => 56" error. Reloading
-    // starts every dashboard reader/signing flow on the newly selected chain.
-    const handleChainChanged = () => {
-      window.location.reload();
-    };
-    window.ethereum.on("chainChanged", handleChainChanged);
-
     return () => {
       window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-      window.ethereum.removeListener("chainChanged", handleChainChanged);
     };
   }, [navigate]);
 

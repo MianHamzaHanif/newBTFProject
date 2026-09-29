@@ -118,7 +118,7 @@ const DashboardBottom = () => {
   };
 
   useEffect(() => {
-    const loadDashboardData = async () => {
+    const loadDashboardData = async (networkRetry = 0) => {
       if (!window.ethereum) {
         setDataStatus("Connect your BSC wallet to load V1 + V2 dashboard data.");
         return;
@@ -258,6 +258,17 @@ const DashboardBottom = () => {
           ? `Loaded V1 + V2 dashboard data for ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}.`
           : "This connected wallet is not registered in either V1 or V2.");
       } catch (error) {
+        const message = error?.shortMessage || error?.message || "";
+        // Mobile wallets may emit this while they are switching from the
+        // wallet's previous chain to BSC. It is not a BSC contract failure;
+        // discard that stale request and read again once the switch settles.
+        if (/network changed|network mismatch/i.test(message) && networkRetry < 2) {
+          setDataStatus("BSC Mainnet selected. Reloading V1 + V2 dashboard data...");
+          window.setTimeout(() => {
+            void loadDashboardData(networkRetry + 1);
+          }, 900);
+          return;
+        }
         setStats({
           totalEarned: "0.00 USD",
           totalInvested: "0.00 USD",
@@ -275,7 +286,7 @@ const DashboardBottom = () => {
           reward: "0.0000",
         });
         setLevelOpenCount("0");
-        setDataStatus(error?.shortMessage || error?.message || "Could not read dashboard data from BSC. Refresh and try again.");
+        setDataStatus(message || "Could not read dashboard data from BSC. Refresh and try again.");
       } finally {
         setIsDashboardLoading(false);
       }
