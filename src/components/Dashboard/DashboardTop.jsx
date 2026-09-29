@@ -207,7 +207,9 @@ const DashboardTop = () => {
 
       // Plan progress follows the migration view, not a single active package:
       //   V1 gross withdrawn (net + fee) + V1 wallet balance
-      // + V2 withdrawn + all currently claimable V2 income.
+      // + every V2 income already claimed into the ledger + every currently
+      // claimable V2 income. A USDT withdrawal itself does not change the
+      // V2 progress, because that income was counted when it was claimed.
       // Its cap is three times the visible V1+V2 investment, with imported
       // V1 source indexes excluded because their V2 rows already contain them.
       const v1Provider = new ethers.JsonRpcProvider(
@@ -221,7 +223,7 @@ const DashboardTop = () => {
         v1FeeBP,
         v2Invested,
         v2PackageHistoryLengthRaw,
-        v2WithdrawLengthRaw,
+        v2IncomeHistoryLengthRaw,
         v2DirectReady,
         v2SelfRoiReady,
         v2LevelRoiReady,
@@ -234,7 +236,7 @@ const DashboardTop = () => {
         v1Manager.withdrawFeeBP(),
         v2Manager.totalUsdtSpent(wallet),
         v2Manager.getPackageHistoryLength(wallet),
-        v2Ledger.getUserWithdrawHistoryLength(wallet),
+        v2Ledger.getUserIncomeHistoryLength(wallet),
         v2Lens.getIncomeReady(wallet, 0),
         v2Lens.getIncomeReady(wallet, 1),
         v2Lens.getIncomeReady(wallet, 2),
@@ -248,11 +250,11 @@ const DashboardTop = () => {
           return { index, amount: BigInt(stake?.packageValue ?? stake?.[0] ?? 0n) };
         },
       ));
-      const [importedV1Indexes, v2Withdrawals, v2Packages] = await Promise.all([
+      const [importedV1Indexes, v2ClaimedIncomeRecords, v2Packages] = await Promise.all([
         readImportedV1Indexes(v2Provider, wallet),
         Promise.all(Array.from(
-          { length: Number(v2WithdrawLengthRaw ?? 0n) },
-          (_, index) => v2Ledger.getUserWithdrawHistoryAt(wallet, index),
+          { length: Number(v2IncomeHistoryLengthRaw ?? 0n) },
+          (_, index) => v2Ledger.getUserIncomeHistoryAt(wallet, index),
         )),
         Promise.all(Array.from(
           { length: Number(v2PackageHistoryLengthRaw ?? 0n) },
@@ -285,8 +287,8 @@ const DashboardTop = () => {
       // progress uses the full withdrawn amount as requested.
       const v1Fee = feeBP < 10_000n ? (v1Net * feeBP) / (10_000n - feeBP) : 0n;
       const v1Used = v1Net + v1Fee + BigInt(v1Withdrawable ?? 0n);
-      const v2Withdrawn = v2Withdrawals.reduce(
-        (total, record) => total + BigInt(record.amount ?? record[0] ?? 0n),
+      const v2ClaimedIncome = v2ClaimedIncomeRecords.reduce(
+        (total, record) => total + BigInt(record.amount ?? record[2] ?? 0n),
         0n,
       );
       const v2Ready = BigInt(v2DirectReady ?? 0n)
@@ -294,7 +296,7 @@ const DashboardTop = () => {
         + BigInt(v2LevelRoiReady ?? 0n)
         + BigInt(v2PowerReady ?? 0n)
         + BigInt(v2RewardReady ?? 0n);
-      const combinedUsed = v1Used + v2Withdrawn + v2Ready;
+      const combinedUsed = v1Used + v2ClaimedIncome + v2Ready;
       const limitExceeded = combinedIncomeLimit > 0n && combinedUsed > combinedIncomeLimit;
       setPlanActivity({
         progressText: combinedIncomeLimit === 0n || limitExceeded

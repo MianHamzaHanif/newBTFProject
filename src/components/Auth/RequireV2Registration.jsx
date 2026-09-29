@@ -55,7 +55,7 @@ export default function RequireV2Registration() {
   }, []);
 
   if (status === "checking") {
-    return <div className="page-container">Checking V1/V2 registration...</div>;
+    return <div className="page-container">Checking registration...</div>;
   }
 
   return status === "allowed" ? <Outlet /> : <Navigate to="/login" replace />;

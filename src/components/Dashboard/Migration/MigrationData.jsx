@@ -19,6 +19,7 @@ const IMPORTER_ABI = [
 ];
 const VERIFIED_IMPORTER_ABI = [
   "function imported(address) view returns(bool)",
+  "function fundingSource() view returns(address)",
   "function importPackage(address user,uint256 sourceIndex)",
   "function importPackages(address user,uint256[] sourceIndices)",
   "function legacyLevelRoiImported(address) view returns(bool)",
@@ -197,6 +198,26 @@ export default function MigrationData() {
     return { contract: new ethers.Contract(V2VerifiedLegacyImporterAddress, VERIFIED_IMPORTER_ABI, signer), provider: signer.provider };
   };
 
+  const packageFundingErrorMessage = async (beneficiary, sourceIndexes, error) => {
+    const rawMessage = error?.shortMessage || error?.reason || error?.message || "Package import failed.";
+    if (!/BEP20:\s*transfer amount exceeds balance/i.test(rawMessage)) return rawMessage;
+
+    try {
+      const v1 = new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_READER_ABI, createV1ReadProvider());
+      const requiredAmount = (await Promise.all(sourceIndexes.map(async (sourceIndex) => {
+        const status = await v1.getStakeIncomeStatus(beneficiary, sourceIndex);
+        return BigInt(status?.remainingIncome ?? status?.[2] ?? 0n);
+      }))).reduce((total, amount) => total + amount, 0n);
+      const v2ReadProvider = new ethers.BrowserProvider(window.ethereum);
+      const importer = new ethers.Contract(V2VerifiedLegacyImporterAddress, VERIFIED_IMPORTER_ABI, v2ReadProvider);
+      const fundingWallet = await importer.fundingSource();
+      const requiredUsdt = ethers.formatUnits(requiredAmount, 18);
+      return `${rawMessage} Funding wallet (owner): ${fundingWallet}. It must hold at least ${requiredUsdt} USDT and approve the Verified V1 Package Importer (${V2VerifiedLegacyImporterAddress}) to spend at least ${requiredUsdt} USDT. The importer transfers this amount to the V2 ledger to reserve the user's remaining package income.`;
+    } catch {
+      return `${rawMessage} The importer's funding wallet (owner) must have enough USDT and approve the Verified V1 Package Importer (${V2VerifiedLegacyImporterAddress}) for the package's remaining income amount.`;
+    }
+  };
+
   const loadNextV1User = async (startAt = nextV1Id) => {
     try {
       const startId = BigInt(String(startAt).trim());
@@ -302,11 +323,13 @@ export default function MigrationData() {
   };
 
   const callImport = async () => {
+    let beneficiary = "";
+    let sourceIndexes = [];
     try {
       if (!window.ethereum) throw new Error("MetaMask or Trust Wallet is not available.");
-      const beneficiary = resolvedWalletAddress(values.user);
+      beneficiary = resolvedWalletAddress(values.user);
       if (!verifiedPackageImport) throw new Error("Verified V1 Package Importer address is not configured for this deployment.");
-      const sourceIndexes = values.sourceIndex.split(",").map((value) => BigInt(value.trim()));
+      sourceIndexes = values.sourceIndex.split(",").map((value) => BigInt(value.trim()));
       if (!sourceIndexes.length || sourceIndexes.some((value, index) => value < 0n || (index > 0 && value <= sourceIndexes[index - 1]))) {
         throw new Error("Enter one or more ascending V1 package indexes, for example 2 or 6,7.");
       }
@@ -328,7 +351,7 @@ export default function MigrationData() {
       setMessage(`Verified V1 package index ${sourceIndexes.join(", ")} imported successfully.`);
       window.dispatchEvent(new Event("btf:v2-data-changed"));
     } catch (error) {
-      setMessage(error?.shortMessage || error?.reason || error?.message || "Package import failed.");
+      setMessage(await packageFundingErrorMessage(beneficiary, sourceIndexes, error));
     } finally { setImporting(false); }
   };
 
