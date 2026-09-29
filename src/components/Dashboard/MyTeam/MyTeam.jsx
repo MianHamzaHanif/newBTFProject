@@ -23,14 +23,19 @@ const V1_TEAM_READER_ABI = [
 ];
 
 const createV1ReadProvider = () => {
-  const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
-  // Public V1 RPCs are more reliable with small individual requests.
-  request.timeout = 30_000;
-  return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {
-    staticNetwork: true,
-    batchMaxCount: 1,
-    batchStallTime: 0,
-  });
+  const makeProvider = (url) => {
+    const request = new ethers.FetchRequest(url);
+    request.timeout = 20_000;
+    return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {
+      staticNetwork: true, batchMaxCount: 1, batchStallTime: 0,
+    });
+  };
+  // Team lists make several back-to-back reads. PublicNode can occasionally
+  // drop one mobile request, so V1 reads fail over to the BSC data seed.
+  return new ethers.FallbackProvider([
+    { provider: makeProvider(V1_MAINNET.rpcUrl), priority: 1, stallTimeout: 1_000, weight: 1 },
+    { provider: makeProvider("https://bsc-dataseed.bnbchain.org"), priority: 2, stallTimeout: 1_500, weight: 1 },
+  ], V1_MAINNET.chainId, { quorum: 1 });
 };
 
 const readInBatches = async (items, read, batchSize = 4) => {
@@ -47,6 +52,7 @@ export const MyTeam = () => {
   const [rows, setRows] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [teamReadAddress, setTeamReadAddress] = useState("");
   const [selectedRow, setSelectedRow] = useState(null);
   const [detailRows, setDetailRows] = useState([]);
   const [isDetailsLoading, setIsDetailsLoading] = useState(false);
@@ -252,6 +258,7 @@ export const MyTeam = () => {
           setLoadError("Connect wallet to load your level-wise team.");
           return;
         }
+        setTeamReadAddress(walletAddress);
         setLoadError("");
 
         const provider = createBscReadProvider();
@@ -266,11 +273,21 @@ export const MyTeam = () => {
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
         const levelIndex = selectedLevel - 1;
         const readLevelAddresses = async (registry) => {
-          const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
-          return readInBatches(
-            Array.from({ length: count }, (_, index) => index),
-            (index) => registry.getLevelUserAt(walletAddress, levelIndex),
-          );
+          let lastError;
+          // A retry is important on mobile networks: a failed list call must
+          // not be interpreted as an empty level.
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
+              return await readInBatches(
+                Array.from({ length: count }, (_, index) => index),
+                (index) => registry.getLevelUserAt(walletAddress, levelIndex),
+              );
+            } catch (error) {
+              lastError = error;
+            }
+          }
+          throw lastError || new Error("Unable to read level users.");
         };
         const [v1Result, v2Result] = await Promise.allSettled([
           readLevelAddresses(v1ReferralContract),
@@ -311,9 +328,15 @@ export const MyTeam = () => {
         }));
 
         setRows(nextRows);
+        const sourceFailures = [
+          v1Result.status === "rejected" ? "V1 team RPC did not respond" : "",
+          v2Result.status === "rejected" ? "V2 team RPC did not respond" : "",
+        ].filter(Boolean);
         const sourceNote = `V1: ${v1Addresses.length}, V2: ${v2Addresses.length}, merged: ${merged.size} for ${formatAddressShort(walletAddress)}.`;
         if (nextRows.length === 0 && merged.size > 0) {
           setLoadError("Team users were found, but package details could not be read. Refresh and try again.");
+        } else if (sourceFailures.length) {
+          setLoadError(`${sourceFailures.join(". ")}. Please refresh; an RPC failure is not an empty team. ${sourceNote}`);
         } else if (nextRows.length === 0) {
           setLoadError(`No team user found on Level ${selectedLevel}. ${sourceNote}`);
         } else {
@@ -350,6 +373,7 @@ export const MyTeam = () => {
   return (
     <div className="page-container">
       <h1>My Team</h1>
+      {teamReadAddress && <p className="team-loading">Reading level team for: {teamReadAddress}</p>}
       <div className="table-wrapper">
         <div className="table-card ">
           <div className="team-levels-wrap">
