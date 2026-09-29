@@ -7,7 +7,7 @@ import { clearRememberedWalletAddress, rememberWalletAddress } from "../../../bl
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
-import { readRegistration } from "../../../blockchain/registrationReader";
+import { readRegistration, readV1Registration } from "../../../blockchain/registrationReader";
 import { canAccessDashboardWithoutRegistration } from "../../../blockchain/migrationAccess";
 
 const Login = () => {
@@ -88,11 +88,18 @@ const Login = () => {
         return;
       }
 
-      const [userData, hasDashboardAccess] = await Promise.all([
+      const [v2Result, v1Result, accessResult] = await Promise.allSettled([
         readRegistration("users", address),
+        readV1Registration("users", address),
         canAccessDashboardWithoutRegistration(address),
       ]);
-      const isRegistered = userData?.exists ?? userData?.[8] ?? false;
+      const userData = v2Result.status === "fulfilled" ? v2Result.value : null;
+      const v1UserData = v1Result.status === "fulfilled" ? v1Result.value : null;
+      const hasDashboardAccess = accessResult.status === "fulfilled" && accessResult.value;
+      const isV2Registered = Boolean(userData?.exists ?? userData?.[8] ?? false);
+      const isV1Registered = Boolean(v1UserData?.exists ?? v1UserData?.[8] ?? false)
+        || Number(v1UserData?.id ?? v1UserData?.[0] ?? 0) > 0;
+      const isRegistered = isV1Registered || isV2Registered;
 
       if (version === loginCheckVersion.current) {
         setRegistrationStatus(isRegistered ? "registered" : "unregistered");

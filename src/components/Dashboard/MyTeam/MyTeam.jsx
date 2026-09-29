@@ -36,6 +36,7 @@ export const MyTeam = () => {
   const [selectedLevel, setSelectedLevel] = useState(1);
   const [rows, setRows] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [selectedRow, setSelectedRow] = useState(null);
   const [detailRows, setDetailRows] = useState([]);
   const [isDetailsLoading, setIsDetailsLoading] = useState(false);
@@ -111,10 +112,14 @@ export const MyTeam = () => {
     ]);
     const v1Length = v1Result.status === "fulfilled" ? Number(v1Result.value ?? 0n) : 0;
     const v2Length = v2Result.status === "fulfilled" ? Number(v2Result.value ?? 0n) : 0;
-    const [v1Stakes, v2Packages] = await Promise.all([
+    const [v1StakesResult, v2PackagesResult] = await Promise.allSettled([
       readInBatches(Array.from({ length: v1Length }, (_, index) => index), (index) => v1Manager.userStakeHistory(address, index)),
       readInBatches(Array.from({ length: v2Length }, (_, index) => index), (index) => v2Manager.getPackageHistoryAt(address, index)),
     ]);
+    // A missing V2 package record must not hide the user's complete V1 team
+    // row (and vice versa). Retain whichever history source answered.
+    const v1Stakes = v1StakesResult.status === "fulfilled" ? v1StakesResult.value : [];
+    const v2Packages = v2PackagesResult.status === "fulfilled" ? v2PackagesResult.value : [];
 
     // Every imported V1 package keeps its original timestamp in V2. Count
     // those keys once so only a new V2 package is added to the V1 amount.
@@ -225,6 +230,7 @@ export const MyTeam = () => {
     const fetchLevelUsers = async () => {
       if (!window.ethereum) {
         setRows([]);
+        setLoadError("Connect wallet to load your level-wise team.");
         return;
       }
 
@@ -233,8 +239,10 @@ export const MyTeam = () => {
         const walletAddress = await getWalletAddress();
         if (!walletAddress) {
           setRows([]);
+          setLoadError("Connect wallet to load your level-wise team.");
           return;
         }
+        setLoadError("");
 
         const provider = createBscReadProvider();
         const v2ReferralContract = new ethers.Contract(
@@ -257,7 +265,13 @@ export const MyTeam = () => {
             Array.from({ length: count }, (_, index) => index),
             (index) => registry.getLevelUserAt(walletAddress, levelIndex),
           );
-          return readInBatches(addresses, async (address) => ({ address, user: await registry.users(address) }));
+          const users = await Promise.allSettled(addresses.map(async (address) => ({
+            address,
+            user: await registry.users(address),
+          })));
+          return users
+            .filter((result) => result.status === "fulfilled")
+            .map((result) => result.value);
         };
         const [v1Result, v2Result] = await Promise.allSettled([
           readLevel(v1ReferralContract),
@@ -272,7 +286,7 @@ export const MyTeam = () => {
           const existing = merged.get(key);
           merged.set(key, { address: item.address, v1User: existing?.v1User ?? null, v2User: item.user });
         }
-        const nextRows = await readInBatches(Array.from(merged.values()), async (member, index) => {
+        const rowResults = await Promise.allSettled(Array.from(merged.values()).map(async (member, index) => {
           const userData = member.v2User ?? member.v1User;
           const packageTotal = await getCombinedPackageTotal(member.address, v1Manager, v2Manager);
           const source = member.v1User && member.v2User ? "V1 + V2" : member.v2User ? "V2" : "V1";
@@ -286,14 +300,24 @@ export const MyTeam = () => {
             totalTeam: (userData?.totalTeam ?? userData?.[3] ?? 0n).toString(),
             totalTeamDeposit: formatEther4(userData?.totalTeamDeposit ?? userData?.[4] ?? 0n),
           };
-        });
+        }));
+        const nextRows = rowResults
+          .filter((result) => result.status === "fulfilled")
+          .map((result) => result.value)
+          .map((row, index) => ({ ...row, sno: index + 1 }));
 
         setRows(nextRows);
+        if (nextRows.length === 0 && merged.size > 0) {
+          setLoadError("Team users were found, but package details could not be read. Refresh and try again.");
+        } else if (nextRows.length === 0) {
+          setLoadError(`No team user found on Level ${selectedLevel}.`);
+        }
         setSelectedRow(null);
         setDetailRows([]);
         setDetailsError("");
-      } catch {
+      } catch (error) {
         setRows([]);
+        setLoadError(error?.shortMessage || error?.message || `Could not load Level ${selectedLevel} team data.`);
         setSelectedRow(null);
         setDetailRows([]);
         setDetailsError("");
@@ -334,6 +358,7 @@ export const MyTeam = () => {
           </div>
 
           {isLoading && <p className="team-loading">Loading level users...</p>}
+          {!isLoading && loadError && <p className="team-loading">{loadError}</p>}
 
           <CustomTable
             columns={referralColumns}

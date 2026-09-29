@@ -2,11 +2,11 @@ import React, { useEffect, useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { ethers } from "ethers";
 import { BSC_MAINNET } from "../../blockchain/bscMainnetConfig";
-import { readRegistration } from "../../blockchain/registrationReader";
+import { readRegistration, readV1Registration } from "../../blockchain/registrationReader";
 import { canAccessDashboardWithoutRegistration } from "../../blockchain/migrationAccess";
 
-// Dashboard routes are protected by the V2 Registry itself. A connected wallet
-// is not enough: `users(wallet).exists` must be true on BSC Mainnet.
+// A member may still be V1-only while migration is underway. Permit access
+// when either Registry recognises the connected wallet.
 export default function RequireV2Registration() {
   const [status, setStatus] = useState("checking");
 
@@ -31,12 +31,18 @@ export default function RequireV2Registration() {
           return;
         }
 
-        const [user, hasDashboardAccess] = await Promise.all([
+        const [v2Result, v1Result, accessResult] = await Promise.allSettled([
           readRegistration("users", wallet),
+          readV1Registration("users", wallet),
           canAccessDashboardWithoutRegistration(wallet),
         ]);
-        const exists = Boolean(user?.exists ?? user?.[8] ?? false);
-        if (!cancelled) setStatus(exists || hasDashboardAccess ? "allowed" : "denied");
+        const v2User = v2Result.status === "fulfilled" ? v2Result.value : null;
+        const v1User = v1Result.status === "fulfilled" ? v1Result.value : null;
+        const hasDashboardAccess = accessResult.status === "fulfilled" && accessResult.value;
+        const v2Exists = Boolean(v2User?.exists ?? v2User?.[8] ?? false);
+        const v1Exists = Boolean(v1User?.exists ?? v1User?.[8] ?? false)
+          || Number(v1User?.id ?? v1User?.[0] ?? 0) > 0;
+        if (!cancelled) setStatus(v1Exists || v2Exists || hasDashboardAccess ? "allowed" : "denied");
       } catch {
         if (!cancelled) setStatus("denied");
       }
@@ -49,7 +55,7 @@ export default function RequireV2Registration() {
   }, []);
 
   if (status === "checking") {
-    return <div className="page-container">Checking V2 registration...</div>;
+    return <div className="page-container">Checking V1/V2 registration...</div>;
   }
 
   return status === "allowed" ? <Outlet /> : <Navigate to="/login" replace />;
