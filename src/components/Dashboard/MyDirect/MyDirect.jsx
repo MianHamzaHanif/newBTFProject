@@ -131,7 +131,6 @@ export const MyDirect = () => {
             registeredAt: formatTime(user.registeredAt ?? user[2]),
             packageUsdt: formatUsdt(selfBusiness),
             totalTeam: (user.totalTeam ?? user[3] ?? 0n).toString(),
-            totalTeamDeposit: formatUsdt(teamBusiness),
           };
         }, 4);
 
@@ -158,7 +157,6 @@ export const MyDirect = () => {
     { id: "registeredAt", label: "Register Time", sortable: true },
     { id: "packageUsdt", label: "Self Business (USDT)", sortable: true },
     { id: "totalTeam", label: "Total Team", sortable: true },
-    { id: "totalTeamDeposit", label: "Team Business (USDT)", sortable: true },
   ];
 
   return <div className="page-container"><h1>My Direct</h1><div className="table-wrapper"><div className="table-card">
@@ -170,7 +168,6 @@ export const MyDirect = () => {
       <TableCell align="center" className="team-time-cell">{row.registeredAt}</TableCell>
       <TableCell align="center">{row.packageUsdt}</TableCell>
       <TableCell align="center">{row.totalTeam}</TableCell>
-      <TableCell align="center">{row.totalTeamDeposit}</TableCell>
     </>} />
   </div></div></div>;
 };

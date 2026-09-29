@@ -77,7 +77,7 @@ export const WithdrawalHistory = () => {
           time: formatTime(record.timestamp ?? record[7]),
           rawTotal: total,
         };
-      });
+      }).filter((row) => row.rawTotal > 0n);
       const newRows = v2Records.map((record) => {
         const total = BigInt(record.amount ?? record[0] ?? 0n);
         return {
@@ -91,7 +91,7 @@ export const WithdrawalHistory = () => {
           time: formatTime(record.timestamp ?? record[1]),
           rawTotal: total,
         };
-      });
+      }).filter((row) => row.rawTotal > 0n);
 
       setV1Total(formatAmount(legacyRows.reduce((sum, row) => sum + row.rawTotal, 0n)));
       setV2Total(formatAmount(newRows.reduce((sum, row) => sum + row.rawTotal, 0n)));
