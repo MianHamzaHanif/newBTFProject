@@ -21,6 +21,28 @@ const V1_TEAM_READER_ABI = [
   "function getLevelUsersLength(address upline,uint256 level) view returns(uint256)",
   "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns(address)",
 ];
+const TEAM_READER_INTERFACE = new ethers.Interface(V1_TEAM_READER_ABI);
+
+// The Vercel proxy has already been verified with these exact calls for the
+// affected wallet. Use plain fetch for the critical level list, avoiding the
+// mobile-browser ethers FallbackProvider layer that was failing both lists.
+const readTeamViaProxy = async (contractAddress, method, args) => {
+  const response = await fetch(`${window.location.origin}/api/bsc-rpc`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: `${method}-${Date.now()}-${Math.random()}`,
+      method: "eth_call",
+      params: [{
+        to: contractAddress,
+        data: TEAM_READER_INTERFACE.encodeFunctionData(method, args),
+      }, "latest"],
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.error) throw new Error(payload?.error?.message || "Team read failed");
+  return TEAM_READER_INTERFACE.decodeFunctionResult(method, payload.result)[0];
+};
 
 const createV1ReadProvider = () => {
   const makeProvider = (url) => {
@@ -273,26 +295,38 @@ export const MyTeam = () => {
         );
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
         const levelIndex = selectedLevel - 1;
-        const readLevelAddresses = async (registry) => {
+        const readLevelAddresses = async (registryAddress, registry) => {
           let lastError;
           // A retry is important on mobile networks: a failed list call must
           // not be interpreted as an empty level.
           for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
-              const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
-              return await readInBatches(
+              const count = Number(await readTeamViaProxy(
+                registryAddress, "getLevelUsersLength", [walletAddress, levelIndex],
+              ));
+              return readInBatches(
                 Array.from({ length: count }, (_, index) => index),
-                (index) => registry.getLevelUserAt(walletAddress, levelIndex),
+                (index) => readTeamViaProxy(registryAddress, "getLevelUserAt", [walletAddress, levelIndex, index]),
               );
             } catch (error) {
               lastError = error;
             }
           }
-          throw lastError || new Error("Unable to read level users.");
+          // Retain the normal ethers provider only as a local-development
+          // fallback. Production list reads use the verified Vercel API path.
+          try {
+            const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
+            return readInBatches(
+              Array.from({ length: count }, (_, index) => index),
+              (index) => registry.getLevelUserAt(walletAddress, levelIndex),
+            );
+          } catch {
+            throw lastError || new Error("Unable to read level users.");
+          }
         };
         const [v1Result, v2Result] = await Promise.allSettled([
-          readLevelAddresses(v1ReferralContract),
-          readLevelAddresses(v2ReferralContract),
+          readLevelAddresses(V1_MAINNET.referralNetwork, v1ReferralContract),
+          readLevelAddresses(ReferralNetworkAddress, v2ReferralContract),
         ]);
         const v1Addresses = v1Result.status === "fulfilled" ? v1Result.value : [];
         const v2Addresses = v2Result.status === "fulfilled" ? v2Result.value : [];
