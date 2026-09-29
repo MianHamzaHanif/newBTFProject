@@ -276,11 +276,13 @@ export const MyTeam = () => {
           readLevelAddresses(v1ReferralContract),
           readLevelAddresses(v2ReferralContract),
         ]);
+        const v1Addresses = v1Result.status === "fulfilled" ? v1Result.value : [];
+        const v2Addresses = v2Result.status === "fulfilled" ? v2Result.value : [];
         const merged = new Map();
-        for (const address of v1Result.status === "fulfilled" ? v1Result.value : []) {
+        for (const address of v1Addresses) {
           merged.set(address.toLowerCase(), { address, inV1: true, inV2: false });
         }
-        for (const address of v2Result.status === "fulfilled" ? v2Result.value : []) {
+        for (const address of v2Addresses) {
           const key = address.toLowerCase();
           const existing = merged.get(key);
           merged.set(key, { address, inV1: existing?.inV1 ?? false, inV2: true });
@@ -309,10 +311,13 @@ export const MyTeam = () => {
         }));
 
         setRows(nextRows);
+        const sourceNote = `V1: ${v1Addresses.length}, V2: ${v2Addresses.length}, merged: ${merged.size} for ${formatAddressShort(walletAddress)}.`;
         if (nextRows.length === 0 && merged.size > 0) {
           setLoadError("Team users were found, but package details could not be read. Refresh and try again.");
         } else if (nextRows.length === 0) {
-          setLoadError(`No team user found on Level ${selectedLevel}.`);
+          setLoadError(`No team user found on Level ${selectedLevel}. ${sourceNote}`);
+        } else {
+          setLoadError(`Loaded Level ${selectedLevel} team. ${sourceNote}`);
         }
         setSelectedRow(null);
         setDetailRows([]);
