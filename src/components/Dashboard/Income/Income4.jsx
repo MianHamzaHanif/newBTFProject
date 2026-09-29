@@ -149,7 +149,6 @@ export const Income4 = () => {
   const powerClaimable = BigInt(details?.claimableAmount ?? 0n) + BigInt(legacyPower?.claimableAmount ?? 0n);
   const historyColumns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "source", label: "Source", sortable: true },
     { id: "level", label: "Power Level", sortable: true },
     { id: "activatedAt", label: "Activated At", sortable: true },
     { id: "releasedCount", label: "Released Cycles", sortable: true },
@@ -229,7 +228,6 @@ export const Income4 = () => {
         renderRow={(row) => (
           <>
             <TableCell align="center">{row.sno}</TableCell>
-            <TableCell align="center">{row.source}</TableCell>
             <TableCell align="center">{row.level}</TableCell>
             <TableCell align="center">{row.activatedAt}</TableCell>
             <TableCell align="center">{row.releasedCount}</TableCell>

@@ -2,8 +2,10 @@ import { TableCell } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
+import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
+import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import { ReferralNetworkAddress } from "../../../blockchain/address";
+import { PackageManagerAddress, ReferralNetworkAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
@@ -37,6 +39,37 @@ const createV1ReadProvider = () => {
   return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
 };
 
+const combinedPackageTotal = async (address, v1Manager, v2Manager) => {
+  const [v1LengthRaw, v2LengthRaw] = await Promise.all([
+    v1Manager.getStakeHistoryLength(address).catch(() => 0n),
+    v2Manager.getPackageHistoryLength(address).catch(() => 0n),
+  ]);
+  const [v1Stakes, v2Packages] = await Promise.all([
+    readInBatches(Array.from({ length: Number(v1LengthRaw) }, (_, index) => index), (index) => v1Manager.userStakeHistory(address, index), 4),
+    readInBatches(Array.from({ length: Number(v2LengthRaw) }, (_, index) => index), (index) => v2Manager.getPackageHistoryAt(address, index), 4),
+  ]);
+  const legacyKeys = new Map();
+  const v1Total = v1Stakes.reduce((total, stake) => {
+    const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n);
+    const timestamp = BigInt(stake?.timestamp ?? stake?.[7] ?? 0n);
+    const key = `${amount}:${timestamp}`;
+    legacyKeys.set(key, (legacyKeys.get(key) ?? 0) + 1);
+    return total + amount;
+  }, 0n);
+  const v2NewTotal = v2Packages.reduce((total, record) => {
+    const amount = BigInt(record?.amount ?? record?.[0] ?? 0n);
+    const timestamp = BigInt(record?.purchasedAt ?? record?.[1] ?? 0n);
+    const key = `${amount}:${timestamp}`;
+    const count = legacyKeys.get(key) ?? 0;
+    if (count > 0) {
+      legacyKeys.set(key, count - 1);
+      return total;
+    }
+    return total + amount;
+  }, 0n);
+  return v1Total + v2NewTotal;
+};
+
 export const MyDirect = () => {
   const [rows, setRows] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -53,6 +86,8 @@ export const MyDirect = () => {
 
         const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, createV1ReadProvider());
         const v2Registry = new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, createBscReadProvider());
+        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, createV1ReadProvider());
+        const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
         const [v1Result, v2Result] = await Promise.allSettled([
           (async () => {
             const count = Number(await v1Registry.getLevelUsersLength(walletAddress, 0));
@@ -72,27 +107,34 @@ export const MyDirect = () => {
         if (v1Result.status === "rejected") failures.push("V1 directs could not be loaded");
         if (v2Result.status === "rejected") failures.push("V2 directs could not be loaded");
 
-        // A migrated V1 direct belongs in the V2 row only. V1-only directs
-        // remain visible until they are migrated, while new V2 directs show
-        // naturally as V2.
-        const v2Addresses = new Set(v2Directs.map(({ address }) => address.toLowerCase()));
-        const combined = [
-          ...v1Directs.filter(({ address }) => !v2Addresses.has(address.toLowerCase())).map(({ address, user }) => ({ source: "V1", address, user })),
-          ...v2Directs.map(({ address, user }) => ({ source: "V2", address, user })),
-        ].map(({ source, address, user }, index) => {
-          const selfDeposit = user.selfDeposit ?? user[5] ?? 0n;
-          const teamDeposit = user.totalTeamDeposit ?? user[4] ?? 0n;
+        const merged = new Map();
+        for (const { address, user } of v1Directs) {
+          merged.set(address.toLowerCase(), { address, v1User: user, v2User: null });
+        }
+        for (const { address, user } of v2Directs) {
+          const previous = merged.get(address.toLowerCase());
+          merged.set(address.toLowerCase(), { address, v1User: previous?.v1User ?? null, v2User: user });
+        }
+        const combined = await readInBatches(Array.from(merged.values()), async ({ address, v1User, v2User }, index) => {
+          const user = v2User ?? v1User;
+          const selfBusiness = await combinedPackageTotal(address, v1Manager, v2Manager);
+          // The Registry's team-business counters are separate from the
+          // member's own package source index. Add V1 and V2 team business;
+          // imported package duplicates are excluded above from Self Business.
+          const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
+            + BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+          const source = v1User && v2User ? "V1 + V2" : v2User ? "V2" : "V1";
           return {
             sno: index + 1,
             source,
             address,
             registeredAt: formatTime(user.registeredAt ?? user[2]),
-            packageUsdt: formatUsdt(selfDeposit),
+            packageUsdt: formatUsdt(selfBusiness),
             totalTeam: (user.totalTeam ?? user[3] ?? 0n).toString(),
-            totalTeamDeposit: formatUsdt(teamDeposit),
-            totalLegBusiness: formatUsdt(selfDeposit + teamDeposit),
+            totalTeamDeposit: formatUsdt(teamBusiness),
+            totalLegBusiness: formatUsdt(selfBusiness + teamBusiness),
           };
-        });
+        }, 4);
 
         if (cancelled) return;
         setRows(combined);
@@ -113,12 +155,11 @@ export const MyDirect = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "source", label: "Source", sortable: true },
     { id: "address", label: "Wallet Address", sortable: true },
     { id: "registeredAt", label: "Register Time", sortable: true },
-    { id: "packageUsdt", label: "Self Package (USDT)", sortable: true },
+    { id: "packageUsdt", label: "Self Business (USDT)", sortable: true },
     { id: "totalTeam", label: "Total Team", sortable: true },
-    { id: "totalTeamDeposit", label: "Total Team Deposit", sortable: true },
+    { id: "totalTeamDeposit", label: "Team Business (USDT)", sortable: true },
     { id: "totalLegBusiness", label: "Total Leg Business", sortable: true },
   ];
 
@@ -127,7 +168,6 @@ export const MyDirect = () => {
     {!isLoading && message && <p className="team-loading">{message}</p>}
     <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
       <TableCell align="center">{row.sno}</TableCell>
-      <TableCell align="center"><span className={`${row.source === "V2" ? "active" : "in-active"} status`}>{row.source}</span></TableCell>
       <TableCell align="center">{shortAddress(row.address)}</TableCell>
       <TableCell align="center" className="team-time-cell">{row.registeredAt}</TableCell>
       <TableCell align="center">{row.packageUsdt}</TableCell>

@@ -164,7 +164,6 @@ export const Income5 = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "source", label: "Source", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
     { id: "business", label: "Leg Business", sortable: true },
     { id: "counted", label: "Counted for Next Reward", sortable: true },
@@ -202,7 +201,6 @@ export const Income5 = () => {
         renderRow={(row) => (
           <>
             <TableCell align="center">{row.sno}</TableCell>
-            <TableCell align="center">{row.source}</TableCell>
             <TableCell align="center">{row.direct}</TableCell>
             <TableCell align="center">{row.business} USDT</TableCell>
             <TableCell align="center">{row.counted} USDT</TableCell>

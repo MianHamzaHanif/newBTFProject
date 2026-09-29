@@ -142,10 +142,10 @@ export default function V2ClaimHistory({ eventName = "", heading = "Income Histo
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "network", label: "Source", sortable: true },
     { id: "incomeType", label: "Income Type", sortable: true },
-    { id: "level", label: "Level", sortable: true },
-    { id: "source", label: "Income From", sortable: true },
+    ...(["DirectIncomeClaimed", "SelfRoiClaimed"].includes(eventName) ? [] : [
+      { id: "level", label: "Level", sortable: true },
+    ]),
     { id: "amount", label: "Claimed USDT", sortable: true },
     { id: "timestamp", label: "Claim Time", sortable: true }
   ];
@@ -175,10 +175,8 @@ export default function V2ClaimHistory({ eventName = "", heading = "Income Histo
             renderRow={(row) => (
               <>
                 <TableCell align="center">{row.sno}</TableCell>
-                <TableCell align="center">{row.network}</TableCell>
                 <TableCell align="center">{row.incomeType}</TableCell>
-                <TableCell align="center">{row.level}</TableCell>
-                <TableCell align="center">{row.source}</TableCell>
+                {!['DirectIncomeClaimed', 'SelfRoiClaimed'].includes(eventName) && <TableCell align="center">{row.level}</TableCell>}
                 <TableCell align="center">{row.amount}</TableCell>
                 <TableCell align="center" className="team-time-cell">{row.timestamp}</TableCell>
               </>

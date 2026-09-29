@@ -124,7 +124,6 @@ export const FlushIncome = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "source", label: "Source", sortable: true },
     { id: "type", label: "Income Type", sortable: true },
     { id: "level", label: "Level", sortable: true },
     { id: "amount", label: "Flushed Amount", sortable: true },
@@ -149,7 +148,6 @@ export const FlushIncome = () => {
       <CustomTable columns={columns} rows={rows} renderRow={(row) => (
         <>
           <TableCell align="center">{row.sno}</TableCell>
-          <TableCell align="center">{row.source}</TableCell>
           <TableCell align="center">{row.type}</TableCell>
           <TableCell align="center">{row.level}</TableCell>
           <TableCell align="center">{row.amount} USDT</TableCell>

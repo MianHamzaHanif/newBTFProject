@@ -110,7 +110,6 @@ export const WithdrawalHistory = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "source", label: "Source", sortable: true },
     { id: "direct", label: "Direct", sortable: true },
     { id: "selfRoi", label: "Self ROI", sortable: true },
     { id: "levelRoi", label: "Level ROI", sortable: true },
@@ -136,7 +135,6 @@ export const WithdrawalHistory = () => {
         <CustomTable columns={columns} rows={rows} renderRow={(row) => (
           <>
             <TableCell align="center">{row.sno}</TableCell>
-            <TableCell align="center">{row.source}</TableCell>
             <TableCell align="center">{row.direct}</TableCell>
             <TableCell align="center">{row.selfRoi}</TableCell>
             <TableCell align="center">{row.levelRoi}</TableCell>

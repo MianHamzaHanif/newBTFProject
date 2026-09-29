@@ -3,14 +3,34 @@ import React, { useEffect, useRef, useState } from "react";
 import CustomTable from "../CommonComponents/CustomTable";
 import { ethers } from "ethers";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
-import PackageManagerLensABI from "../../../blockchain/packageManagerLensABI.json";
+import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
+import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import {
-  PackageManagerLensAddress,
+  PackageManagerAddress,
   ReferralNetworkAddress,
 } from "../../../blockchain/address";
-import { createBscReadProvider } from "../../../blockchain/readProvider";
-import { getReadWalletAddress } from "../../../blockchain/readProvider";
+import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
+
+const createV1ReadProvider = () => {
+  const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
+  // Public V1 RPCs are more reliable with small individual requests.
+  return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {
+    staticNetwork: true,
+    batchMaxCount: 1,
+    batchStallTime: 0,
+  });
+};
+
+const readInBatches = async (items, read, batchSize = 4) => {
+  const output = [];
+  for (let start = 0; start < items.length; start += batchSize) {
+    const batch = items.slice(start, start + batchSize);
+    output.push(...await Promise.all(batch.map(read)));
+  }
+  return output;
+};
 
 export const MyTeam = () => {
   const [selectedLevel, setSelectedLevel] = useState(1);
@@ -84,6 +104,43 @@ export const MyTeam = () => {
     return walletAddress;
   };
 
+  const getCombinedPackageTotal = async (address, v1Manager, v2Manager) => {
+    const [v1Result, v2Result] = await Promise.allSettled([
+      v1Manager.getStakeHistoryLength(address),
+      v2Manager.getPackageHistoryLength(address),
+    ]);
+    const v1Length = v1Result.status === "fulfilled" ? Number(v1Result.value ?? 0n) : 0;
+    const v2Length = v2Result.status === "fulfilled" ? Number(v2Result.value ?? 0n) : 0;
+    const [v1Stakes, v2Packages] = await Promise.all([
+      readInBatches(Array.from({ length: v1Length }, (_, index) => index), (index) => v1Manager.userStakeHistory(address, index)),
+      readInBatches(Array.from({ length: v2Length }, (_, index) => index), (index) => v2Manager.getPackageHistoryAt(address, index)),
+    ]);
+
+    // Every imported V1 package keeps its original timestamp in V2. Count
+    // those keys once so only a new V2 package is added to the V1 amount.
+    const legacySourceKeys = new Map();
+    let v1Total = 0n;
+    for (const stake of v1Stakes) {
+      const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n);
+      const purchasedAt = BigInt(stake?.timestamp ?? stake?.[7] ?? 0n);
+      v1Total += amount;
+      const key = `${amount}:${purchasedAt}`;
+      legacySourceKeys.set(key, (legacySourceKeys.get(key) ?? 0) + 1);
+    }
+    const v2NewTotal = v2Packages.reduce((total, record) => {
+      const amount = BigInt(record?.amount ?? record?.[0] ?? 0n);
+      const purchasedAt = BigInt(record?.purchasedAt ?? record?.[1] ?? 0n);
+      const key = `${amount}:${purchasedAt}`;
+      const legacyCount = legacySourceKeys.get(key) ?? 0;
+      if (legacyCount > 0) {
+        legacySourceKeys.set(key, legacyCount - 1);
+        return total;
+      }
+      return total + amount;
+    }, 0n);
+    return v1Total + v2NewTotal;
+  };
+
   const fetchTeamDetails = async (downlineAddress) => {
     if (!window.ethereum || !downlineAddress) {
       setDetailRows([]);
@@ -106,19 +163,19 @@ export const MyTeam = () => {
         ReferralNetworkABI,
         provider,
       );
-      const packageManagerLens = new ethers.Contract(
-        PackageManagerLensAddress,
-        PackageManagerLensABI,
+      const packageManager = new ethers.Contract(
+        PackageManagerAddress,
+        V2PackageManagerABI,
         provider,
       );
 
-      const packageLengthRaw = await packageManagerLens.getStakeHistoryLength(downlineAddress);
+      const packageLengthRaw = await packageManager.getPackageHistoryLength(downlineAddress);
       const packageLength = Number(packageLengthRaw ?? 0n);
       const nextRows = [];
       const levelIndex = selectedLevel - 1;
 
       for (let index = 0; index < packageLength; index += 1) {
-        const stakeData = await packageManagerLens.getStakeHistoryAt(downlineAddress, index);
+        const stakeData = await packageManager.getPackageHistoryAt(downlineAddress, index);
         let roiRaw = 0n;
 
         try {
@@ -135,7 +192,7 @@ export const MyTeam = () => {
         nextRows.push({
           sno: index + 1,
           walletAddress: downlineAddress,
-          amount: formatEther4(stakeData?.usdtAmount ?? stakeData?.[1] ?? 0n),
+          amount: formatEther4(stakeData?.amount ?? stakeData?.[0] ?? 0n),
           roi: formatEther4(roiRaw ?? 0n),
         });
       }
@@ -180,41 +237,56 @@ export const MyTeam = () => {
         }
 
         const provider = createBscReadProvider();
-        const referralContract = new ethers.Contract(
+        const v2ReferralContract = new ethers.Contract(
           ReferralNetworkAddress,
           ReferralNetworkABI,
           provider,
         );
-
-        const levelIndex = selectedLevel - 1;
-        const length = await referralContract.getLevelUsersLength(
-          walletAddress,
-          levelIndex,
+        const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
+        const v1Provider = createV1ReadProvider();
+        const v1ReferralContract = new ethers.Contract(
+          V1_MAINNET.referralNetwork,
+          ReferralNetworkABI,
+          v1Provider,
         );
-
-        const nextRows = [];
-        const levelUsersLength = Number(length);
-
-        for (let loopIndex = 0; loopIndex < levelUsersLength; loopIndex += 1) {
-          const userAddress = await referralContract.getLevelUserAt(
-            walletAddress,
-            levelIndex,
-            loopIndex,
+        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
+        const levelIndex = selectedLevel - 1;
+        const readLevel = async (registry) => {
+          const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
+          const addresses = await readInBatches(
+            Array.from({ length: count }, (_, index) => index),
+            (index) => registry.getLevelUserAt(walletAddress, levelIndex),
           );
-          const userData = await referralContract.users(userAddress);
-
-          nextRows.push({
-            sno: loopIndex + 1,
-            address: userAddress,
-            registeredAt: formatTimestamp(userData?.registeredAt ?? userData?.[2]),
-            packageToken: formatEther4(userData?.selfStakeToken ?? userData?.[7] ?? 0n),
-            packageUsdt: formatEther4(userData?.selfDeposit ?? userData?.[5] ?? 0n),
-            totalTeam: (userData?.totalTeam ?? userData?.[3] ?? 0n).toString(),
-            totalTeamDeposit: formatEther4(
-              userData?.totalTeamDeposit ?? userData?.[4] ?? 0n,
-            ),
-          });
+          return readInBatches(addresses, async (address) => ({ address, user: await registry.users(address) }));
+        };
+        const [v1Result, v2Result] = await Promise.allSettled([
+          readLevel(v1ReferralContract),
+          readLevel(v2ReferralContract),
+        ]);
+        const merged = new Map();
+        for (const item of v1Result.status === "fulfilled" ? v1Result.value : []) {
+          merged.set(item.address.toLowerCase(), { address: item.address, v1User: item.user, v2User: null });
         }
+        for (const item of v2Result.status === "fulfilled" ? v2Result.value : []) {
+          const key = item.address.toLowerCase();
+          const existing = merged.get(key);
+          merged.set(key, { address: item.address, v1User: existing?.v1User ?? null, v2User: item.user });
+        }
+        const nextRows = await readInBatches(Array.from(merged.values()), async (member, index) => {
+          const userData = member.v2User ?? member.v1User;
+          const packageTotal = await getCombinedPackageTotal(member.address, v1Manager, v2Manager);
+          const source = member.v1User && member.v2User ? "V1 + V2" : member.v2User ? "V2" : "V1";
+          return {
+            sno: index + 1,
+            address: member.address,
+            registeredAt: formatTimestamp(userData?.registeredAt ?? userData?.[2]),
+            source,
+            packageToken: formatEther4(userData?.selfStakeToken ?? userData?.[7] ?? 0n),
+            packageUsdt: formatEther4(packageTotal),
+            totalTeam: (userData?.totalTeam ?? userData?.[3] ?? 0n).toString(),
+            totalTeamDeposit: formatEther4(userData?.totalTeamDeposit ?? userData?.[4] ?? 0n),
+          };
+        });
 
         setRows(nextRows);
         setSelectedRow(null);

@@ -45,7 +45,6 @@ const IncomeTable = ({ incomeType, heading, topContent = null, bottomContent = n
 
   const referralColumns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "source", label: "Source Address", sortable: true },
     { id: "amount", label: "Amount", sortable: true },
     { id: "timestamp", label: "Time", sortable: true },
   ];
@@ -188,7 +187,6 @@ const IncomeTable = ({ incomeType, heading, topContent = null, bottomContent = n
             renderRow={(row) => (
               <>
                 <TableCell align="center">{row.sno}</TableCell>
-                <TableCell align="center">{formatAddressShort(row.source)}</TableCell>
                 <TableCell align="center">{row.amount}</TableCell>
                 <TableCell align="center" className="team-time-cell">
                   {row.timestamp}

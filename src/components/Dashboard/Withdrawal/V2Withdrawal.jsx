@@ -33,6 +33,7 @@ const V1_MANAGER_ABI = [
   "function incomeLimitBP() view returns(uint256)",
   "function powerIncomeModule() view returns(address)",
   "function rewardIncomeModule() view returns(address)",
+  "function withdrawIncome() external",
 ];
 const V1_REFERRAL_ABI = [
   "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
@@ -71,6 +72,7 @@ export default function V2Withdrawal() {
   const [v1Loading, setV1Loading] = useState(false);
   const [v1Message, setV1Message] = useState("");
   const [hasV1Registration, setHasV1Registration] = useState(false);
+  const [v1Withdrawing, setV1Withdrawing] = useState(false);
 
   const loadV1Overview = useCallback(async () => {
     try {
@@ -193,6 +195,30 @@ export default function V2Withdrawal() {
     }
   };
 
+  const withdrawV1 = async () => {
+    if (!window.ethereum) {
+      setV1Message("MetaMask or Trust Wallet is not available.");
+      return;
+    }
+    try {
+      setV1Withdrawing(true);
+      setV1Message("Confirm V1 withdrawal in your wallet.");
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      await ensureBscMainnet();
+      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_MANAGER_ABI, signer);
+      const tx = await v1Manager.withdrawIncome();
+      await tx.wait();
+      setV1Message("V1 income withdrawn successfully.");
+      await loadV1Overview();
+      window.dispatchEvent(new Event("btf:v2-data-changed"));
+    } catch (error) {
+      setV1Message(error?.shortMessage || error?.reason || error?.message || "V1 withdrawal failed.");
+    } finally {
+      setV1Withdrawing(false);
+    }
+  };
+
   return (
     <>
       {showV1 && <div id="withdraw-v1" className="table-card" style={{ marginTop: "24px" }}>
@@ -217,6 +243,11 @@ export default function V2Withdrawal() {
           <div className="withdrawal-card"><p className="withdrawal-card-title">Income Limit Token</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.incomeLimit)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Remaining USDT</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.remainingUsdt)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimable Income</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.totalClaimable)} USDT</h4></div>
+        </div>
+        <div className="withdraw-action-wrap">
+          <button className="custom-button withdraw-btn" onClick={withdrawV1} disabled={v1Loading || v1Withdrawing}>
+            {v1Withdrawing ? "Withdrawing..." : "Withdraw V1"}
+          </button>
         </div>
       </div>}
 
