@@ -8,7 +8,7 @@ import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
 import { readRegistration } from "../../../blockchain/registrationReader";
-import { canAccessMigration } from "../../../blockchain/migrationAccess";
+import { canAccessDashboardWithoutRegistration } from "../../../blockchain/migrationAccess";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -88,17 +88,16 @@ const Login = () => {
         return;
       }
 
-      const [userData, hasMigrationAccess] = await Promise.all([
+      const [userData, hasDashboardAccess] = await Promise.all([
         readRegistration("users", address),
-        canAccessMigration(address),
+        canAccessDashboardWithoutRegistration(address),
       ]);
       const isRegistered = userData?.exists ?? userData?.[8] ?? false;
 
       if (version === loginCheckVersion.current) {
         setRegistrationStatus(isRegistered ? "registered" : "unregistered");
         setRegisterMessage({ text: "", type: "" });
-        if (isRegistered) navigate("/dashboard", { replace: true });
-        else if (hasMigrationAccess) navigate("/migration-data", { replace: true });
+        if (isRegistered || hasDashboardAccess) navigate("/dashboard", { replace: true });
       }
     } catch (error) {
       if (version !== loginCheckVersion.current) return;

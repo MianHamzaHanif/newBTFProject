@@ -13,7 +13,7 @@ export type PackageTier = {
 
 export const CONTRACT_CONFIG = {
   address: import.meta.env.VITE_BTF_V2_PACKAGE_MANAGER_ADDRESS || '',
-  explorerUrl: `https://testnet.bscscan.com/address/${import.meta.env.VITE_BTF_V2_PACKAGE_MANAGER_ADDRESS || ''}`,
+  explorerUrl: `https://bscscan.com/address/${import.meta.env.VITE_BTF_V2_PACKAGE_MANAGER_ADDRESS || ''}`,
   domain: 'app.btf.finance',
 };
 

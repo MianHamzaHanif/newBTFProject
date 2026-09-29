@@ -149,6 +149,7 @@ export const Income4 = () => {
   const powerClaimable = BigInt(details?.claimableAmount ?? 0n) + BigInt(legacyPower?.claimableAmount ?? 0n);
   const historyColumns = [
     { id: "sno", label: "S. No", sortable: true },
+    { id: "source", label: "Source", sortable: true },
     { id: "level", label: "Power Level", sortable: true },
     { id: "activatedAt", label: "Activated At", sortable: true },
     { id: "releasedCount", label: "Released Cycles", sortable: true },
@@ -156,7 +157,9 @@ export const Income4 = () => {
     { id: "claimedAmount", label: "Claimed Amount", sortable: true },
     { id: "lastClaimAt", label: "Last Claim Time", sortable: true },
   ];
-  const historyRows = levelDetails.map((item, index) => {
+  const v2HistoryRows = levelDetails
+    .filter((item) => !legacyPower || Number(legacyPower.level) !== item.level)
+    .map((item) => {
     const lastClaim = details?.lastClaimAt ?? 0n;
     let releasedCount = Number(item.releasedCount);
     if (item.level === activeLevel && item.activatedAt && powerTiming.now >= item.activatedAt) {
@@ -164,7 +167,7 @@ export const Income4 = () => {
       releasedCount = Math.max(releasedCount, Number(virtualReleased > 20n ? 20n : virtualReleased));
     }
     return {
-      sno: index + 1,
+      source: "V2 (New)",
       level: `P${item.level}`,
       activatedAt: formatTime(item.activatedAt),
       releasedCount: `${releasedCount} / 20`,
@@ -173,6 +176,18 @@ export const Income4 = () => {
       lastClaimAt: formatTime(lastClaim),
     };
   });
+  const historyRows = [
+    ...(legacyPower ? [{
+      source: "V1 (Legacy)",
+      level: `P${legacyPower.level}`,
+      activatedAt: formatTime(legacyPower.originalAchievedAt),
+      releasedCount: `${legacyPower.paidInstallments} / 20`,
+      claimedCount: Number(legacyPower.paidInstallments),
+      claimedAmount: "-",
+      lastClaimAt: "Migrated schedule",
+    }] : []),
+    ...v2HistoryRows,
+  ].map((item, index) => ({ ...item, sno: index + 1 }));
 
   return (
     <div className="page-container">
@@ -214,6 +229,7 @@ export const Income4 = () => {
         renderRow={(row) => (
           <>
             <TableCell align="center">{row.sno}</TableCell>
+            <TableCell align="center">{row.source}</TableCell>
             <TableCell align="center">{row.level}</TableCell>
             <TableCell align="center">{row.activatedAt}</TableCell>
             <TableCell align="center">{row.releasedCount}</TableCell>

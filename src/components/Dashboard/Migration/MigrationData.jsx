@@ -63,6 +63,11 @@ const V2_STRUCTURE_MIGRATION_ABI = [
   "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
   "function isMigrationAuthority(address) view returns(bool)",
 ];
+const NEXT_USER_SCAN_BATCH_SIZE = 10;
+// Tree registration is complete/not required for this deployment. Keep the
+// implementation available for a future controlled migration, but hide it
+// from the operational UI.
+const SHOW_TREE_REGISTRATION_RUNNER = false;
 const LEVEL_BRIDGE_ABI = [
   "function owner() view returns(address)",
   "function migrationOperator(address) view returns(bool)",
@@ -121,7 +126,7 @@ export default function MigrationData() {
   const [checkingV1Ranks, setCheckingV1Ranks] = useState(false);
   const [v1RankCheckError, setV1RankCheckError] = useState("");
   const [v1RankSnapshot, setV1RankSnapshot] = useState(null);
-  const [nextV1Id, setNextV1Id] = useState("0");
+  const [nextV1Id, setNextV1Id] = useState("1");
   const [nextV1User, setNextV1User] = useState(null);
   const [loadingNextV1User, setLoadingNextV1User] = useState(false);
   const verifiedPackageImport = ethers.isAddress(V2VerifiedLegacyImporterAddress) && V2VerifiedLegacyImporterAddress !== ethers.ZeroAddress;
@@ -180,11 +185,23 @@ export default function MigrationData() {
       const v2 = new ethers.Contract(ReferralNetworkAddress, V2_STRUCTURE_MIGRATION_ABI, createV1ReadProvider());
       const endId = await v1.nextUserId();
 
-      for (let id = startId; id < endId; id += 1n) {
-        const user = await v1.idToAddress(id);
-        const [v1User, alreadyMigrated] = await Promise.all([v1.users(user), v2.migrated(user)]);
+      // First read only V1 IDs and their V2 migrated flags in small parallel
+      // batches. Previously every ID was checked serially, so starting at 1
+      // waited through all already-migrated users before anything appeared.
+      for (let batchStart = startId; batchStart < endId; batchStart += BigInt(NEXT_USER_SCAN_BATCH_SIZE)) {
+        const batchEnd = batchStart + BigInt(NEXT_USER_SCAN_BATCH_SIZE) > endId
+          ? endId
+          : batchStart + BigInt(NEXT_USER_SCAN_BATCH_SIZE);
+        const ids = Array.from({ length: Number(batchEnd - batchStart) }, (_, offset) => batchStart + BigInt(offset));
+        const users = await Promise.all(ids.map((id) => v1.idToAddress(id)));
+        const migratedFlags = await Promise.all(users.map((user) => v2.migrated(user)));
+        const candidateIndex = migratedFlags.findIndex((migrated) => !migrated);
+        if (candidateIndex === -1) continue;
+
+        const id = ids[candidateIndex];
+        const user = users[candidateIndex];
+        const v1User = await v1.users(user);
         if (!Boolean(v1User.exists ?? v1User[8])) throw new Error(`V1 ID ${id} is invalid. Migration stopped.`);
-        if (alreadyMigrated) continue;
 
         const referral = v1User.referral ?? v1User[1];
         if (id !== 0n) {
@@ -233,8 +250,18 @@ export default function MigrationData() {
       if (!await registry.isMigrationAuthority(caller)) throw new Error("Connected wallet is not authorised as a V2 migration operator.");
       if (await registry.migrated(candidate.user)) throw new Error(`V1 ID ${candidate.id} is already migrated. Press Load Next V1 User.`);
 
+      // Some injected wallet RPCs fail their own eth_estimateGas before the
+      // confirmation dialog. Estimate against the public Mainnet reader and
+      // supply a 25% buffer so MetaMask only has to submit the prepared call.
+      const readRegistry = new ethers.Contract(
+        ReferralNetworkAddress,
+        V2_STRUCTURE_MIGRATION_ABI,
+        createV1ReadProvider(),
+      );
+      const estimatedGas = await readRegistry.migrateUser.estimateGas(candidate.user, { from: caller });
+      const gasLimit = (estimatedGas * 125n) / 100n + 25_000n;
       setMessage(`Confirm V1 ID ${candidate.id} structure migration in your wallet. No package or income is imported by this step.`);
-      const tx = await registry.migrateUser(candidate.user);
+      const tx = await registry.migrateUser(candidate.user, { gasLimit });
       await tx.wait();
       if (!await registry.migrated(candidate.user)) throw new Error("Transaction confirmed but the V2 Registry did not mark this user as migrated.");
 
@@ -603,16 +630,16 @@ export default function MigrationData() {
 
   return <div className="page-container migration-page"><div className="migration-form-shell">
     <div className="migration-form-heading"><div className="migration-form-icon"><i className="bi bi-arrow-left-right" /></div><div><h1>Migration Data</h1><p>V1 package, Power and Reward values are verified on-chain before V2 import.</p></div></div>
-    <div className="migration-level-panel">
+    {SHOW_TREE_REGISTRATION_RUNNER && <div className="migration-level-panel">
       <div className="migration-section-title"><span>1</span> V1 Tree Registration Runner</div>
-      <p className="migration-panel-note">Start from V1 ID 0 once to migrate the root state. Then migrate in ID order. After every confirmed transaction, the next V1 address is loaded automatically. An error stops the runner on that user; no later user is submitted.</p>
-      <div className="migration-address-row"><div className="migration-field"><label>Start / Next V1 User ID</label><input value={nextV1Id} onChange={(event) => setNextV1Id(event.target.value.replace(/[^0-9]/g, ""))} placeholder="0" inputMode="numeric" autoComplete="off" /></div></div>
+      <p className="migration-panel-note">Migration starts at V1 ID 1. First load and review the V1 ID, wallet and referrer. Only after your review, press the Migrate button to open MetaMask. After every confirmed transaction, the next V1 address is loaded automatically. An error stops the runner on that user; no later user is submitted.</p>
+      <div className="migration-address-row"><div className="migration-field"><label>Start / Next V1 User ID</label><input value={nextV1Id} onChange={(event) => setNextV1Id(event.target.value.replace(/[^0-9]/g, ""))} placeholder="1" inputMode="numeric" autoComplete="off" /></div></div>
       <div className="migration-actions"><button className="migration-secondary-action" onClick={() => loadNextV1User()} disabled={loadingNextV1User || importing}>{loadingNextV1User ? "Loading V1 User..." : "Load Next V1 User"}</button>{nextV1User && <button className="migration-primary-button" onClick={migrateNextV1User} disabled={importing}>{importing ? "Migrating..." : `Migrate V1 ID ${nextV1User.id}`}<i className="bi bi-arrow-right" /></button>}</div>
       {nextV1User && <div className="migration-active-package-results"><p>Ready for V2 structure migration</p><div className="migration-active-package-item"><strong>V1 ID #{nextV1User.id}</strong><span>User: {nextV1User.user}</span><span>V1 Referrer: {nextV1User.referral}</span><span>Registered: {new Date(Number(nextV1User.registeredAt) * 1000).toLocaleString()}</span></div></div>}
-    </div>
-    <div className="migration-section-title"><span>2</span> Beneficiary</div>
+    </div>}
+    <div className="migration-section-title"><span>1</span> Beneficiary</div>
     <div className="migration-address-row"><div className="migration-field migration-field-wide"><label htmlFor="migration-user">User Wallet Address</label><input id="migration-user" value={values.user} onChange={(event) => setValue("user", event.target.value)} placeholder="0x..." autoComplete="off" /></div></div>
-    <div className="migration-section-title"><span>3</span> Verified V1 Active Package</div>
+    <div className="migration-section-title"><span>2</span> Verified V1 Active Package</div>
     <div className="migration-package-layout">
       <div className="migration-package-check-column">
         <button className="migration-secondary-button" onClick={checkActiveV1Packages} disabled={checkingActivePackages || importing}>{checkingActivePackages ? "Checking..." : "Check Active Packages"}</button>
@@ -626,21 +653,21 @@ export default function MigrationData() {
       </div>
     </div>
     <div className="migration-level-panel">
-      <div className="migration-section-title"><span>4</span> Active Level Business</div>
+      <div className="migration-section-title"><span>3</span> Active Level Business</div>
       <p className="migration-panel-note">Enter only active V1 package business for every level. This is a one-time seed and requires the package import first.</p>
       <div className="migration-level-refresh"><button className="migration-secondary-action" onClick={refreshV1LevelBusiness} disabled={refreshingLevelBusiness || importing}>{refreshingLevelBusiness ? "Refreshing V1 Business..." : "Refresh V1 Active Business"}</button>{levelBusinessRefreshError && <span>{levelBusinessRefreshError}</span>}</div>
       <div className="migration-level-grid">{levelBusiness.map((amount, index) => <Field key={index} label={`Level ${index + 1} Business`} suffix="USDT" value={amount} onChange={(value) => setLevelBusiness((current) => current.map((entry, position) => position === index ? value : entry))} placeholder="0" />)}</div>
       <div className="migration-actions"><button className="migration-secondary-action" onClick={seedLevelBusiness} disabled={importing}>{importing ? "Processing..." : "Call V2 Level Business Seed"}</button></div>
     </div>
     <div className="migration-level-panel">
-      <div className="migration-section-title"><span>5</span> Pending Level ROI</div>
+      <div className="migration-section-title"><span>4</span> Pending Level ROI</div>
       <p className="migration-panel-note">Refresh V1 to read every currently open level and its pending ROI. The batch import reads V1 again on-chain and imports all open-level amounts in one transaction.</p>
       <div className="migration-level-refresh"><button className="migration-secondary-action" onClick={refreshV1PendingLevelRoi} disabled={refreshingPendingLevelRoi || importing}>{refreshingPendingLevelRoi ? "Refreshing V1 ROI..." : "Refresh V1 Pending Level ROI"}</button>{pendingLevelRoiError && <span>{pendingLevelRoiError}</span>}</div>
       {pendingLevelRoiRefreshed && <><div className="migration-pending-roi-summary"><span>Open Levels: {openV1Levels.filter(Boolean).length}</span><strong>Total Pending Level ROI: {ethers.formatUnits(pendingLevelRoi.reduce((total, amount) => total + ethers.parseUnits(amount || "0", 18), 0n), 18)} USDT</strong></div><div className="migration-level-grid">{pendingLevelRoi.map((amount, index) => openV1Levels[index] && <Field key={index} label={`Level ${index + 1} Pending ROI`} suffix="USDT" value={amount} onChange={(value) => setPendingLevelRoi((current) => current.map((entry, position) => position === index ? value : entry))} placeholder="0" />)}</div></>}
       <div className="migration-actions"><button className="migration-secondary-action" onClick={importPendingLevelRoiBatch} disabled={importing || !verifiedPackageImport || !pendingLevelRoiRefreshed}>{importing ? "Processing..." : "Import All V1 Pending Level ROI"}</button></div>
     </div>
     <div className="migration-level-panel">
-      <div className="migration-section-title"><span>6</span> Verified V1 Power & Reward Income</div>
+      <div className="migration-section-title"><span>5</span> Verified V1 Power & Reward Income</div>
       <p className="migration-panel-note">Beneficiary address above is passed to the importer. It reads the current V1 Power/Reward ranks, achieved time, claimed and flush state, then imports only the remaining pending income. No Power/Reward amount, rank or timestamp can be typed manually.</p>
       <div className="migration-level-refresh"><button className="migration-secondary-action" onClick={checkV1PowerAndReward} disabled={checkingV1Ranks || importing}>{checkingV1Ranks ? "Checking V1 Ranks..." : "Check V1 Power & Reward"}</button>{v1RankCheckError && <span>{v1RankCheckError}</span>}</div>
       {v1RankSnapshot && <div className="migration-rank-results"><div className="migration-rank-card"><span>V1 Power Rank</span><strong>{v1RankSnapshot.powerLevel === 0n ? "No Power Rank" : `P${v1RankSnapshot.powerLevel}`}</strong><small>Unclaimed: {ethers.formatUnits(v1RankSnapshot.powerPending, 18)} USDT</small><small>Claimed installments: {v1RankSnapshot.powerPaid.toString()} | Flush: {ethers.formatUnits(v1RankSnapshot.powerFlush, 18)} USDT</small></div><div className="migration-rank-card"><span>V1 Reward Rank</span><strong>{v1RankSnapshot.rewards.length ? `R${v1RankSnapshot.rewards.length}` : "No Reward Rank"}</strong><small>Unclaimed: {ethers.formatUnits(v1RankSnapshot.rewards.reduce((total, reward) => total + reward.pending, 0n), 18)} USDT</small><small>Flush: {ethers.formatUnits(v1RankSnapshot.rewardFlush, 18)} USDT</small>{v1RankSnapshot.rewards.map((reward) => <small key={reward.index}>R{reward.index}: {ethers.formatUnits(reward.pending, 18)} USDT pending</small>)}</div></div>}

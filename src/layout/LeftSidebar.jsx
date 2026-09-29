@@ -6,6 +6,7 @@ import { ReferralNetworkAddress } from "../blockchain/address";
 import { BSC_MAINNET } from "../blockchain/bscMainnetConfig";
 import { getReadWalletAddress } from "../blockchain/readProvider";
 import { canAccessMigration } from "../blockchain/migrationAccess";
+import { V1_MAINNET } from "../blockchain/v1MainnetConfig";
 import user from "/dashboardimg/user.png";
 
 const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
@@ -16,6 +17,8 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const [userId, setUserId] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [canViewMigration, setCanViewMigration] = useState(false);
+  const [hasV1Registration, setHasV1Registration] = useState(false);
+  const V1_USER_ABI = ["function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)"];
 
   const formatWalletAddress = (address) => {
     if (!address) {
@@ -42,6 +45,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       if (!address || !ethers.isAddress(address)) {
         setUserId("");
         setCanViewMigration(false);
+        setHasV1Registration(false);
         return;
       }
 
@@ -60,6 +64,13 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
       }
       setCanViewMigration(await canAccessMigration(address));
+      try {
+        const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
+        const v1User = await v1.users(address);
+        setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
+      } catch {
+        setHasV1Registration(false);
+      }
     };
 
     const handleAccountsChanged = async (accounts) => {
@@ -69,6 +80,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       if (!address || !ethers.isAddress(address)) {
         setUserId("");
         setCanViewMigration(false);
+        setHasV1Registration(false);
         return;
       }
 
@@ -87,6 +99,13 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
       }
       setCanViewMigration(await canAccessMigration(address));
+      try {
+        const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
+        const v1User = await v1.users(address);
+        setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
+      } catch {
+        setHasV1Registration(false);
+      }
     };
 
     loadWallet();
@@ -333,12 +352,19 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
             {activeDropdown === "withdrawal" && (
               <div className="dropdown open withdrawal-dropdown">
-                <NavLink
-                  to="/withdrawal"
+                {hasV1Registration && <NavLink
+                  to="/withdrawal#withdraw-v1"
                   className="nav"
                   onClick={handleNavItemClick}
                 >
-                  <p className="nav-item sub">Withdrawal</p>
+                  <p className="nav-item sub">Withdraw V1</p>
+                </NavLink>}
+                <NavLink
+                  to="/withdrawal#withdraw-v2"
+                  className="nav"
+                  onClick={handleNavItemClick}
+                >
+                  <p className="nav-item sub">Withdraw V2</p>
                 </NavLink>
 
                 <NavLink

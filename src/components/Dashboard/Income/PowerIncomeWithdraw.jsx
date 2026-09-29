@@ -85,27 +85,44 @@ export const PowerIncomeWithdraw = () => {
           registry.getLevelUserAt(user, 0, index),
         ),
       );
-      const directRows = await Promise.all(
+      const directBreakdowns = await Promise.all(
         directAddresses.map(async (direct, index) => {
-          const [business, qualified, legacyCounted, everPackage] = await Promise.all([
+          const [business, legacyBusiness, qualified, legacyCounted, everPackage] = await Promise.all([
             registry.legBusiness(user, direct),
+            registry.legacyLegBusiness(user, direct),
             registry.hasQualifiedPackage(direct),
             registry.legacyDirectCounted(direct).catch(() => false),
             registry.hasEverPackage(direct).catch(() => true),
           ]);
           const eligible = legacyCounted || everPackage;
-          const counted = nextLevel && eligible
-            ? (business > capPerLeg ? capPerLeg : business)
+          const legacyAmount = BigInt(legacyBusiness);
+          const totalAmount = BigInt(business);
+          const newAmount = totalAmount > legacyAmount ? totalAmount - legacyAmount : 0n;
+          const totalCounted = nextLevel && eligible
+            ? (totalAmount > capPerLeg ? capPerLeg : totalAmount)
             : 0n;
+          const legacyCountedAmount = legacyAmount > totalCounted ? totalCounted : legacyAmount;
           return {
-            sno: index + 1,
             direct: shortAddress(direct),
-            business: formatUsdt(business),
-            counted: formatUsdt(counted),
+            legacyAmount,
+            newAmount,
+            legacyCountedAmount,
+            newCountedAmount: totalCounted - legacyCountedAmount,
             status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package",
           };
         }),
       );
+
+      // `legBusiness` includes imported V1 business. Show the V1 part first,
+      // then only a real V2 increment. A zero V2 increment is intentionally hidden.
+      const directRows = [
+        ...directBreakdowns
+          .filter((item) => item.legacyAmount > 0n)
+          .map((item) => ({ source: "V1 (Legacy)", direct: item.direct, business: formatUsdt(item.legacyAmount), counted: formatUsdt(item.legacyCountedAmount), status: item.status })),
+        ...directBreakdowns
+          .filter((item) => item.newAmount > 0n)
+          .map((item) => ({ source: "V2 (New)", direct: item.direct, business: formatUsdt(item.newAmount), counted: formatUsdt(item.newCountedAmount), status: item.status })),
+      ].map((item, index) => ({ ...item, sno: index + 1 }));
 
       setSummary({
         achieved,
@@ -175,6 +192,7 @@ export const PowerIncomeWithdraw = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
+    { id: "source", label: "Source", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
     { id: "business", label: "Leg Business", sortable: true },
     { id: "counted", label: "Counted for Next Power", sortable: true },
@@ -216,6 +234,7 @@ export const PowerIncomeWithdraw = () => {
       <CustomTable columns={columns} rows={rows} renderRow={(row) => (
         <>
           <TableCell align="center">{row.sno}</TableCell>
+          <TableCell align="center">{row.source}</TableCell>
           <TableCell align="center">{row.direct}</TableCell>
           <TableCell align="center">{row.business} USDT</TableCell>
           <TableCell align="center">{row.counted} USDT</TableCell>

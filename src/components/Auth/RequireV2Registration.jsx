@@ -3,6 +3,7 @@ import { Navigate, Outlet } from "react-router-dom";
 import { ethers } from "ethers";
 import { BSC_MAINNET } from "../../blockchain/bscMainnetConfig";
 import { readRegistration } from "../../blockchain/registrationReader";
+import { canAccessDashboardWithoutRegistration } from "../../blockchain/migrationAccess";
 
 // Dashboard routes are protected by the V2 Registry itself. A connected wallet
 // is not enough: `users(wallet).exists` must be true on BSC Mainnet.
@@ -30,9 +31,12 @@ export default function RequireV2Registration() {
           return;
         }
 
-        const user = await readRegistration("users", wallet);
+        const [user, hasDashboardAccess] = await Promise.all([
+          readRegistration("users", wallet),
+          canAccessDashboardWithoutRegistration(wallet),
+        ]);
         const exists = Boolean(user?.exists ?? user?.[8] ?? false);
-        if (!cancelled) setStatus(exists ? "allowed" : "denied");
+        if (!cancelled) setStatus(exists || hasDashboardAccess ? "allowed" : "denied");
       } catch {
         if (!cancelled) setStatus("denied");
       }
