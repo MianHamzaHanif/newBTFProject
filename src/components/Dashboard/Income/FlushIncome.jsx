@@ -75,7 +75,6 @@ export const FlushIncome = () => {
             rows.push({
               source: "V1 (Legacy)",
               type: labels[type],
-              level: "-",
               amount: formatAmount(amount),
               time: formatTime(summary.timestamp ?? summary[7]),
             });
@@ -108,7 +107,6 @@ export const FlushIncome = () => {
       const v2Rows = v2Snapshot.records.map((record) => ({
         source: "V2 (New)",
         type: labels[Number(record.incomeType)] || "Unknown",
-        level: Number(record.level) || "-",
         amount: formatAmount(record.amount),
         time: formatTime(record.timestamp),
       }));
@@ -125,7 +123,6 @@ export const FlushIncome = () => {
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "type", label: "Income Type", sortable: true },
-    { id: "level", label: "Level", sortable: true },
     { id: "amount", label: "Flushed Amount", sortable: true },
     { id: "time", label: "Flush Time", sortable: true },
   ];
@@ -149,7 +146,6 @@ export const FlushIncome = () => {
         <>
           <TableCell align="center">{row.sno}</TableCell>
           <TableCell align="center">{row.type}</TableCell>
-          <TableCell align="center">{row.level}</TableCell>
           <TableCell align="center">{row.amount} USDT</TableCell>
           <TableCell align="center">{row.time}</TableCell>
         </>

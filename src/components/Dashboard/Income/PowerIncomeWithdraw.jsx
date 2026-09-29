@@ -256,11 +256,11 @@ export const PowerIncomeWithdraw = () => {
           <h1 className="mb-1">Power & Reward Rank Update</h1>
           <p className="mb-0 text-light-emphasis">Scan direct-leg business in safe pages, then unlock the next eligible rank.</p>
         </div>
-        <div className="d-flex flex-wrap align-items-center gap-2">
-          <button className="btn btn-primary" onClick={syncNextPowerReward} disabled={syncing}>
+        <div className="power-rank-actions">
+          <button className="power-rank-action power-rank-action-primary" onClick={syncNextPowerReward} disabled={syncing}>
             {syncing ? "Updating ranks..." : "Update Power & Reward"}
           </button>
-          <button className="btn btn-outline-primary" onClick={loadPowerIncome} disabled={loading || syncing}>
+          <button className="power-rank-action power-rank-action-secondary" onClick={loadPowerIncome} disabled={loading || syncing}>
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>

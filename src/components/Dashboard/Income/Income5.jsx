@@ -219,11 +219,11 @@ export const Income5 = () => {
     <div className="page-container">
       <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
         <h1 className="mb-0">Reward Income</h1>
-        <div className="d-flex align-items-center gap-2">
-          <button className="btn btn-primary" onClick={syncNextPowerReward} disabled={syncing}>
+        <div className="power-rank-actions">
+          <button className="power-rank-action power-rank-action-primary" onClick={syncNextPowerReward} disabled={syncing}>
             {syncing ? "Updating ranks..." : "Update Power & Reward"}
           </button>
-          <button className="btn btn-outline-primary" onClick={loadRewardDetails} disabled={loading || syncing}>
+          <button className="power-rank-action power-rank-action-secondary" onClick={loadRewardDetails} disabled={loading || syncing}>
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>

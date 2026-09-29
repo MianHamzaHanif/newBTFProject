@@ -375,7 +375,7 @@ export const MyTeam = () => {
         } else if (nextRows.length === 0) {
           setLoadError(`No team user found on Level ${selectedLevel}. ${sourceNote}`);
         } else {
-          setLoadError(`Loaded Level ${selectedLevel} team. ${sourceNote}`);
+          setLoadError("");
         }
         setSelectedRow(null);
         setDetailRows([]);

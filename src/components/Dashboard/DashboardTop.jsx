@@ -829,7 +829,7 @@ const DashboardTop = () => {
         <img src={circleimg} alt="" />
         <p className="small-title">Plan Percentage</p>
         <h3 className="upgrade">
-          <span>{isPlanLoading ? "Loading V1 + V2..." : planActivity.progressText}</span>
+          <span>{isPlanLoading ? "Loading ..." : planActivity.progressText}</span>
         </h3>
         <p className="small-title">{isPlanLoading ? "Reading active package data" : planActivity.activeStakeLabel}</p>
 

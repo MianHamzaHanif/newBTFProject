@@ -26,7 +26,7 @@ const LEGACY_IMPORT_EVENT = new ethers.Interface([
 
 // Returns the exact V1 package indexes imported to V2. The event is emitted
 // by the verified importer and avoids counting a migrated package twice in
-// V1 + V2 dashboard investment totals.
+// dashboard investment totals.
 const readImportedV1Indexes = async (provider, user) => {
   if (!ethers.isAddress(V2VerifiedLegacyImporterAddress)) return null;
   try {
@@ -143,7 +143,7 @@ const DashboardBottom = () => {
   useEffect(() => {
     const loadDashboardData = async (networkRetry = 0) => {
       if (!window.ethereum) {
-        setDataStatus("Connect your BSC wallet to load V1 + V2 dashboard data.");
+        setDataStatus("Connect your BSC wallet to load dashboard data.");
         return;
       }
 
@@ -155,7 +155,7 @@ const DashboardBottom = () => {
           setDataStatus("Wallet account is not connected. Reconnect the registered wallet to load data.");
           return;
         }
-        setDataStatus("Loading V1 + V2 data...");
+        setDataStatus("Loading data...");
 
         // Start V1 and V2 reads together. V1 totals are aggregate contract
         // fields, so they are fast even for accounts with a long history.
@@ -331,7 +331,7 @@ const DashboardBottom = () => {
           setReferralLink("");
         }
         setDataStatus(v2IsRegistered || v1IsRegistered
-          ? `Loaded V1 + V2 dashboard data for ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}.`
+          ? ""
           : "This connected wallet is not registered in either V1 or V2.");
       } catch (error) {
         const message = error?.shortMessage || error?.message || "";
@@ -339,7 +339,7 @@ const DashboardBottom = () => {
         // wallet's previous chain to BSC. It is not a BSC contract failure;
         // discard that stale request and read again once the switch settles.
         if (/network changed|network mismatch/i.test(message) && networkRetry < 2) {
-          setDataStatus("BSC Mainnet selected. Reloading V1 + V2 dashboard data...");
+          setDataStatus("BSC Mainnet selected. Reloading dashboard data...");
           window.setTimeout(() => {
             void loadDashboardData(networkRetry + 1);
           }, 900);
@@ -456,7 +456,7 @@ const DashboardBottom = () => {
       </div>
 
       <div className="dashboard-bottom-wrapper">
-        {isDashboardLoading && <p className="team-loading" style={{ gridColumn: "1 / -1" }}>Loading V1 + V2 dashboard data...</p>}
+        {isDashboardLoading && <p className="team-loading" style={{ gridColumn: "1 / -1" }}>Loading dashboard data...</p>}
         {dataStatus && <p className="team-loading" style={{ gridColumn: "1 / -1" }}>{dataStatus}</p>}
         <div className="affiliate-section">
           {/* <div className="affiliate-header">

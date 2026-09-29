@@ -572,3 +572,58 @@
         padding-top: 36px;
     }
 }
+
+/* Power/Reward rank actions must not inherit the dashboard-wide `.btn`
+   polygon dimensions. Keep both actions usable and non-overlapping on phones. */
+.power-rank-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.power-rank-action {
+    min-height: 46px;
+    padding: 11px 18px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+    transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.power-rank-action-primary {
+    color: #042638;
+    background: linear-gradient(135deg, #16d7b9, #25cde6);
+    box-shadow: 0 8px 22px rgba(11, 218, 198, 0.22);
+}
+
+.power-rank-action-secondary {
+    color: #d8f7fa;
+    background: rgba(11, 74, 88, 0.62);
+    border-color: rgba(22, 215, 185, 0.7);
+}
+
+.power-rank-action:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+}
+
+.power-rank-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+@media (max-width: 576px) {
+    .power-rank-actions {
+        width: 100%;
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .power-rank-action {
+        width: 100%;
+        min-height: 50px;
+    }
+}

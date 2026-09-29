@@ -270,7 +270,7 @@ export const Income4 = () => {
 
       {message ? <p className="text-danger">{message}</p> : null}
 
-      <h4 className="mt-4 mb-3">Power Claim History (V1 + V2)</h4>
+      <h4 className="mt-4 mb-3">Power Claim History</h4>
 
       <CustomTable
         columns={historyColumns}
