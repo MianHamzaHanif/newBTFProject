@@ -392,12 +392,13 @@ export default function MigrationData() {
   const seedLevelBusiness = async () => {
     try {
       if (!window.ethereum) throw new Error("MetaMask or Trust Wallet is not available.");
+      const beneficiary = resolvedWalletAddress(values.user);
       const amounts = levelBusiness.map((amount) => ethers.parseUnits(amount || "0", 18));
       setImporting(true);
       setMessage("Checking level-business migration authority...");
       const { contract: bridge, provider } = await authorisedContract(V2ManualLegacyLevelBridgeAddress, LEVEL_BRIDGE_ABI);
-      await verifyUser(provider);
-      const tx = await bridge.seedVerifiedLevels(values.user, amounts);
+      await verifyUser(provider, beneficiary);
+      const tx = await bridge.seedVerifiedLevels(beneficiary, amounts);
       setMessage("Confirm the V2 Level Business transaction in your wallet.");
       await tx.wait();
       setMessage("Level active business seeded successfully.");
@@ -513,17 +514,17 @@ export default function MigrationData() {
   const importPendingLevelRoiBatch = async () => {
     try {
       if (!window.ethereum) throw new Error("MetaMask or Trust Wallet is not available.");
-      if (!ethers.isAddress(values.user)) throw new Error("Enter a valid user wallet address.");
+      const beneficiary = resolvedWalletAddress(values.user);
       if (!verifiedPackageImport) throw new Error("Verified V1 Package Importer address is not configured for this deployment.");
       if (!pendingLevelRoiRefreshed) throw new Error("Pehle Refresh V1 Pending Level ROI karein.");
       setImporting(true);
       setMessage("Preparing the UI-calculated pending Level ROI array for batch import...");
       const { contract: importer, provider } = await authorisedVerifiedImporter();
-      await verifyUser(provider);
-      if (!await importer.imported(values.user)) throw new Error("Pehle verified V1 package import karein.");
-      if (await importer.legacyLevelRoiImported(values.user)) throw new Error("V1 pending Level ROI is already imported for this user.");
+      await verifyUser(provider, beneficiary);
+      if (!await importer.imported(beneficiary)) throw new Error("Pehle verified V1 package import karein.");
+      if (await importer.legacyLevelRoiImported(beneficiary)) throw new Error("V1 pending Level ROI is already imported for this user.");
       const expectedAmounts = pendingLevelRoi.map((amount) => ethers.parseUnits(amount || "0", 18));
-      const tx = await importer.importPendingLevelRoiFromV1(values.user, expectedAmounts);
+      const tx = await importer.importPendingLevelRoiFromV1(beneficiary, expectedAmounts);
       setMessage("Confirm the Pending Level ROI batch import transaction in your wallet.");
       await tx.wait();
       setMessage("All currently open V1 levels' pending ROI imported successfully.");
@@ -561,15 +562,15 @@ export default function MigrationData() {
   const importVerifiedRanks = async () => {
     try {
       if (!window.ethereum) throw new Error("MetaMask or Trust Wallet is not available.");
-      if (!ethers.isAddress(values.user)) throw new Error("Enter a valid user wallet address.");
+      const beneficiary = resolvedWalletAddress(values.user);
       if (!verifiedRankImport) throw new Error("Verified V1 Power/Reward Importer address is not configured for this deployment.");
       setImporting(true);
       setMessage("Reading V1 Power/Reward rank, claimed installments and current pending income on-chain...");
       const { provider } = await authorisedVerifiedImporter();
-      await verifyUser(provider);
+      await verifyUser(provider, beneficiary);
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
       const importer = new ethers.Contract(V2VerifiedLegacyRankImporterAddress, VERIFIED_RANK_IMPORTER_ABI, signer);
-      const tx = await importer.importVerifiedRanks(values.user);
+      const tx = await importer.importVerifiedRanks(beneficiary);
       setMessage("Confirm the verified V1 Power & Reward import transaction in your wallet.");
       await tx.wait();
       setMessage("Verified V1 Power and Reward state imported successfully.");
@@ -692,7 +693,7 @@ export default function MigrationData() {
       <div className="migration-package-check-column">
         <button className="migration-secondary-button" onClick={checkActiveV1Packages} disabled={checkingActivePackages || importing}>{checkingActivePackages ? "Checking..." : "Check Active Packages"}</button>
         {activePackageCheckError && <div className="migration-package-check-error">{activePackageCheckError}</div>}
-        {activeV1Packages.length > 0 && <div className="migration-active-package-results"><p>Active V1 package indexes · Current Direct: {ethers.formatUnits(activeV1DirectIncome, 18)} USDT</p>{activeV1Packages.map((item) => <div className="migration-active-package-item" key={item.index}><strong>Index #{item.index}</strong><span>Package: {ethers.formatUnits(item.packageValue, 18)} USDT</span><span>Income Limit: {ethers.formatUnits(item.incomeLimit, 18)} USDT</span><span>Used Income: {ethers.formatUnits(item.usedIncome, 18)} USDT</span><span>Remaining: {ethers.formatUnits(item.remainingIncome, 18)} USDT</span><span>Self ROI: {ethers.formatUnits(item.selfRoiGenerated, 18)} / {ethers.formatUnits(item.selfRoiMaximum, 18)} USDT</span><span>Self ROI Claimed: {ethers.formatUnits(item.selfRoiClaimed, 18)} USDT</span><span>Self ROI Claimable: {ethers.formatUnits(item.selfRoiClaimable, 18)} USDT</span></div>)}</div>}
+        {activeV1Packages.length > 0 && <div className="migration-active-package-results"><p>Active V1 package indexes · V1 Direct Pending: {ethers.formatUnits(activeV1DirectIncome, 18)} USDT</p>{activeV1Packages.map((item) => <div className="migration-active-package-item" key={item.index}><strong>Index #{item.index}</strong><span>Package: {ethers.formatUnits(item.packageValue, 18)} USDT</span><span>Income Limit: {ethers.formatUnits(item.incomeLimit, 18)} USDT</span><span>Used Income: {ethers.formatUnits(item.usedIncome, 18)} USDT</span><span>Remaining: {ethers.formatUnits(item.remainingIncome, 18)} USDT</span><span>Direct Pending (to V2): {ethers.formatUnits(activeV1DirectIncome, 18)} USDT</span><span>Self ROI: {ethers.formatUnits(item.selfRoiGenerated, 18)} / {ethers.formatUnits(item.selfRoiMaximum, 18)} USDT</span><span>Self ROI Claimed: {ethers.formatUnits(item.selfRoiClaimed, 18)} USDT</span><span>Self ROI Claimable: {ethers.formatUnits(item.selfRoiClaimable, 18)} USDT</span></div>)}</div>}
         {!checkingActivePackages && !activePackageCheckError && activeV1Packages.length === 0 && <p className="migration-panel-note migration-package-empty">{hasCheckedActivePackages ? "No active V1 package found for this beneficiary." : "Check beneficiary's active V1 packages."}</p>}
       </div>
       <div className="migration-package-import-column">
