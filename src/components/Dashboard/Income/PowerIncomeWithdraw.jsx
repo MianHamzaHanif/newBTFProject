@@ -4,9 +4,13 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
+
+const V1_POWER_MANAGER_ABI = ["function powerIncomeModule() view returns(address)"];
+const V1_POWER_MODULE_ABI = ["function activePowerLevel(address) view returns(uint256)"];
 
 const formatUsdt = (value) => {
   try {
@@ -60,6 +64,9 @@ export const PowerIncomeWithdraw = () => {
         registry.getPowerRewardSync(user),
       ]);
       const achieved = Number(achievedPowerRaw);
+      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, createBscReadProvider());
+      const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, createBscReadProvider());
+      const v1Achieved = Number(await v1PowerModule.activePowerLevel(user));
       const achievedReward = Number(achievedRewardRaw);
       const nextLevel = achieved < 9 ? achieved + 1 : 0;
       const nextReward = achievedReward < 12 ? achievedReward + 1 : 0;
@@ -126,6 +133,9 @@ export const PowerIncomeWithdraw = () => {
 
       setSummary({
         achieved,
+        // V2 is the authoritative display when both contracts report P1,
+        // P2, etc. V1 is only a fallback / separate legacy rank.
+        v1Achieved: v1Achieved && v1Achieved !== achieved ? v1Achieved : 0,
         achievedReward,
         nextLevel,
         nextReward,
@@ -215,7 +225,8 @@ export const PowerIncomeWithdraw = () => {
         </div>
       </div>
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
-        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Power</p><h4 className="withdrawal-card-value">{summary?.achieved ? `P${summary.achieved}` : "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Power</p><h4 className="withdrawal-card-value">{summary?.achieved ? `P${summary.achieved}` : summary?.v1Achieved ? `P${summary.v1Achieved}` : "0"}</h4></div>
+        {summary?.v1Achieved ? <div className="withdrawal-card"><p className="withdrawal-card-title">V1 Power (Legacy)</p><h4 className="withdrawal-card-value">P{summary.v1Achieved}</h4></div> : null}
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Power</p><h4 className="withdrawal-card-value">{summary?.nextLevel ? `P${summary.nextLevel}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Power)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.qualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>

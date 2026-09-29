@@ -4,9 +4,12 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
+
+const V1_REWARD_MANAGER_ABI = ["function rewardAchievedAt(address user,uint256 index) view returns(uint256)"];
 
 const formatUsdt = (value) => {
   try {
@@ -52,6 +55,9 @@ export const Income5 = () => {
         createBscReadProvider(),
       );
       const achieved = Number(await registry.getAchievedRewardCount(user));
+      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_REWARD_MANAGER_ABI, createBscReadProvider());
+      const v1RewardTimes = await Promise.all(Array.from({ length: 12 }, (_, offset) => v1Manager.rewardAchievedAt(user, offset + 1)));
+      const v1Achieved = v1RewardTimes.reduce((highest, achievedAt, offset) => BigInt(achievedAt) > 0n ? offset + 1 : highest, 0);
       const nextIndex = achieved < 12 ? achieved + 1 : 0;
       const [qualifiedBusiness, requiredBusiness, directCount] = nextIndex
         ? await Promise.all([
@@ -109,7 +115,17 @@ export const Income5 = () => {
           .map((item) => ({ source: "V2 (New)", direct: item.direct, business: formatUsdt(item.newAmount), counted: formatUsdt(item.newCountedAmount), status: item.status })),
       ].map((item, index) => ({ ...item, sno: index + 1 }));
 
-      setSummary({ achieved, nextIndex, qualifiedBusiness, requiredBusiness, remaining, capPerLeg });
+      setSummary({
+        achieved,
+        // Do not show a legacy R1 separately if V2 already has R1. V1 is a
+        // fallback or a distinct higher/lower historical reward record.
+        v1Achieved: v1Achieved && v1Achieved !== achieved ? v1Achieved : 0,
+        nextIndex,
+        qualifiedBusiness,
+        requiredBusiness,
+        remaining,
+        capPerLeg,
+      });
       setRows(directRows);
     } catch (error) {
       setSummary(null);
@@ -185,7 +201,8 @@ export const Income5 = () => {
       </div>
 
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
-        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achieved ? `R${summary.achieved}` : "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achieved ? `R${summary.achieved}` : summary?.v1Achieved ? `R${summary.v1Achieved}` : "0"}</h4></div>
+        {summary?.v1Achieved ? <div className="withdrawal-card"><p className="withdrawal-card-title">V1 Reward (Legacy)</p><h4 className="withdrawal-card-value">R{summary.v1Achieved}</h4></div> : null}
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Reward</p><h4 className="withdrawal-card-value">{summary?.nextIndex ? `R${summary.nextIndex}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Reward)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.qualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>

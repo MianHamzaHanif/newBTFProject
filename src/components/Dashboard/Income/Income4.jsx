@@ -5,6 +5,7 @@ import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import {
   createBscReadProvider,
   getReadWalletAddress,
@@ -30,6 +31,16 @@ const RANK_CHECKPOINT_READ_ABI = [
   "function getPowerSchedule(address) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)",
   "function previewPowerClaimable(address user) view returns(uint256 level,uint256 amount)"
 ];
+const V1_POWER_MANAGER_ABI = [
+  "function powerIncomeModule() view returns(address)",
+  "function totalPowerIncomeClaimed(address) view returns(uint256)",
+];
+const V1_POWER_MODULE_ABI = [
+  "function activePowerLevel(address) view returns(uint256)",
+  "function powerLevelStartedAt(address) view returns(uint256)",
+  "function powerClaimedCount(address) view returns(uint256)",
+  "function rawClaimable(address) view returns(uint256)",
+];
 
 const card = (title, value, note = "") => (
   <div className="withdrawal-card">
@@ -47,6 +58,7 @@ export const Income4 = () => {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [legacyPower, setLegacyPower] = useState(null);
+  const [v1Power, setV1Power] = useState(null);
 
   const loadPowerDetails = useCallback(async () => {
     setLoading(true);
@@ -112,6 +124,17 @@ export const Income4 = () => {
         checkpoint.getPowerSchedule(user),
         checkpoint.previewPowerClaimable(user),
       ]);
+      // V1 is read independently. Its active rank is displayed alongside V2
+      // unless that same P-level already exists in V2 (V2 then wins).
+      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, provider);
+      const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, provider);
+      const [v1Level, v1ActivatedAt, v1ClaimedCount, v1Claimable, v1TotalClaimed] = await Promise.all([
+        v1PowerModule.activePowerLevel(user),
+        v1PowerModule.powerLevelStartedAt(user),
+        v1PowerModule.powerClaimedCount(user),
+        v1PowerModule.rawClaimable(user),
+        v1Manager.totalPowerIncomeClaimed(user),
+      ]);
       setDetails(powerDetails);
       setLegacyPower(legacySchedule.set ? {
         originalAchievedAt: legacySchedule.originalAchievedAt,
@@ -120,6 +143,13 @@ export const Income4 = () => {
         unpaidAmount: legacySchedule.unpaidAmount,
         level: legacySchedule.level,
         claimableAmount: legacyPreview[1],
+      } : null);
+      setV1Power(BigInt(v1Level) > 0n ? {
+        level: v1Level,
+        activatedAt: v1ActivatedAt,
+        claimedCount: v1ClaimedCount,
+        claimableAmount: v1Claimable,
+        totalClaimed: v1TotalClaimed,
       } : null);
       setLevelDetails(levels);
       setPowerTiming({ now: BigInt(latestBlock?.timestamp ?? 0), roiDay: BigInt(roiDay ?? 120n) });
@@ -130,6 +160,7 @@ export const Income4 = () => {
       setPowerTiming({ now: 0n, roiDay: 120n });
       setRegistryAchievementAt(0n);
       setLegacyPower(null);
+      setV1Power(null);
       setMessage(error?.shortMessage || error?.message || "Could not load Power details");
     } finally {
       setLoading(false);
@@ -140,13 +171,26 @@ export const Income4 = () => {
     loadPowerDetails();
   }, [loadPowerDetails]);
 
-  const activeLevel = Number(details?.activeLevel ?? 0n);
-  const achievedLevel = Number(details?.achievedLevel ?? 0n);
+  const nativeActiveLevel = Number(details?.activeLevel ?? 0n);
+  const nativeAchievedLevel = Number(details?.achievedLevel ?? 0n);
+  // A migrated checkpoint is V2 data too. Its rank takes precedence over a
+  // matching historical V1 P-level, just like a native V2 rank does.
+  const v2RankLevels = new Set([
+    ...levelDetails.map((item) => Number(item.level)),
+    ...(legacyPower ? [Number(legacyPower.level)] : []),
+  ].filter(Boolean));
+  const showV1Power = Boolean(v1Power && !v2RankLevels.has(Number(v1Power.level)));
+  const activeLevel = nativeActiveLevel || Number(legacyPower?.level ?? 0n) || Number(v1Power?.level ?? 0n);
+  const achievedLevel = nativeAchievedLevel || Number(legacyPower?.level ?? 0n) || Number(v1Power?.level ?? 0n);
   const nextLevel = Number(details?.nextLevel ?? 0n);
   const qualified = formatUsdt(details?.nextQualifiedBusiness);
   const required = formatUsdt(details?.nextRequiredBusiness);
-  const powerTime = BigInt(legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt;
-  const powerClaimable = BigInt(details?.claimableAmount ?? 0n) + BigInt(legacyPower?.claimableAmount ?? 0n);
+  const powerTime = BigInt(legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt || BigInt(v1Power?.activatedAt ?? 0n);
+  const powerClaimable = BigInt(details?.claimableAmount ?? 0n)
+    + BigInt(legacyPower?.claimableAmount ?? 0n)
+    + (showV1Power ? BigInt(v1Power?.claimableAmount ?? 0n) : 0n);
+  const powerClaimed = BigInt(details?.totalClaimed ?? 0n)
+    + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n);
   const historyColumns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "level", label: "Power Level", sortable: true },
@@ -156,9 +200,7 @@ export const Income4 = () => {
     { id: "claimedAmount", label: "Claimed Amount", sortable: true },
     { id: "lastClaimAt", label: "Last Claim Time", sortable: true },
   ];
-  const v2HistoryRows = levelDetails
-    .filter((item) => !legacyPower || Number(legacyPower.level) !== item.level)
-    .map((item) => {
+  const v2HistoryRows = levelDetails.map((item) => {
     const lastClaim = details?.lastClaimAt ?? 0n;
     let releasedCount = Number(item.releasedCount);
     if (item.level === activeLevel && item.activatedAt && powerTiming.now >= item.activatedAt) {
@@ -166,7 +208,6 @@ export const Income4 = () => {
       releasedCount = Math.max(releasedCount, Number(virtualReleased > 20n ? 20n : virtualReleased));
     }
     return {
-      source: "V2 (New)",
       level: `P${item.level}`,
       activatedAt: formatTime(item.activatedAt),
       releasedCount: `${releasedCount} / 20`,
@@ -176,16 +217,25 @@ export const Income4 = () => {
     };
   });
   const historyRows = [
-    ...(legacyPower ? [{
-      source: "V1 (Legacy)",
+    ...v2HistoryRows,
+    // The rank checkpoint is stored and paid by V2. Keep it as a V2 row;
+    // this prevents the old V1 P-level from appearing twice after migration.
+    ...(legacyPower && !v2HistoryRows.some((item) => item.level === `P${legacyPower.level}`) ? [{
       level: `P${legacyPower.level}`,
       activatedAt: formatTime(legacyPower.originalAchievedAt),
       releasedCount: `${legacyPower.paidInstallments} / 20`,
       claimedCount: Number(legacyPower.paidInstallments),
       claimedAmount: "-",
-      lastClaimAt: "Migrated schedule",
+      lastClaimAt: "V2 migrated schedule",
     }] : []),
-    ...v2HistoryRows,
+    ...(showV1Power ? [{
+      level: `P${v1Power.level}`,
+      activatedAt: formatTime(v1Power.activatedAt),
+      releasedCount: `${v1Power.claimedCount} / 20`,
+      claimedCount: Number(v1Power.claimedCount),
+      claimedAmount: formatUsdt(v1Power.totalClaimed),
+      lastClaimAt: "V1 active record",
+    }] : []),
   ].map((item, index) => ({ ...item, sno: index + 1 }));
 
   return (
@@ -201,7 +251,7 @@ export const Income4 = () => {
         {card("Active Power Level", activeLevel ? `P${activeLevel}` : "0")}
         {card("Achieved Power Level (Now)", achievedLevel ? `P${achievedLevel}` : "0")}
         {card("Power Level Activated At", formatTime(powerTime))}
-        {card("Total Power Income Claimed", formatUsdt(details?.totalClaimed))}
+        {card("Total Power Income Claimed", formatUsdt(powerClaimed))}
         {card(
           "Power Income Claimable",
           formatUsdt(powerClaimable),
@@ -220,7 +270,7 @@ export const Income4 = () => {
 
       {message ? <p className="text-danger">{message}</p> : null}
 
-      <h4 className="mt-4 mb-3">Power Claim History</h4>
+      <h4 className="mt-4 mb-3">Power Claim History (V1 + V2)</h4>
 
       <CustomTable
         columns={historyColumns}

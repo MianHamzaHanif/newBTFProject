@@ -6,6 +6,7 @@ import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import { PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 
 const E18 = 10n ** 18n;
 const rewardAmounts = [0n, 250n, 500n, 1250n, 2500n, 5000n, 5000n, 5000n, 5000n, 5000n, 5000n, 5000n, 5000n];
@@ -14,6 +15,10 @@ const ROI_DAY_SECONDS = 120n;
 const RANK_CHECKPOINT_READ_ABI = [
   "function getRewardSchedule(address user,uint256 index) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)",
   "function previewRewardClaimable(address user,uint256 index) view returns(uint256 amount)"
+];
+const V1_REWARD_MANAGER_ABI = [
+  "function rewardAchievedAt(address user,uint256 index) view returns(uint256)",
+  "function rewardClaimedAmountByIndex(address user,uint256 index) view returns(uint256)",
 ];
 
 const formatEther4 = (value) => {
@@ -125,14 +130,49 @@ export const Income6 = () => {
             : BigInt(claimed);
           claimedTotal += historicClaimed;
           unlockedTotal += released;
-          const row = { source: isLegacyBaseline ? "V1 (Legacy)" : "V2 (New)", rewardLevel: `R${index}`, achievedAt: formatTimestamp(achievedAtValue), totalRewardAmount: formatEther4(totalReward), monthlyRewardAmount: formatEther4(rewardAmounts[index] * E18), installmentCount: `${released}/${rewardInstallments[index]}`, releasedAmount: formatEther4(releasedAmount), claimedCycles: isLegacyBaseline && legacyScheduleSet ? Number(legacySchedule.paidInstallments) : Number(claimedCycles), claimedAmount: formatEther4(historicClaimed), claimableAmount: formatEther4(claimable), remainingAmount: formatEther4(remainingAmount), nextPayoutAt: formatTimestamp(nextPayoutAt), lastClaimAt: formatTimestamp(lastClaimAt) };
+          // A checkpoint schedule is paid by V2 after migration, even when
+          // its original achievement came from V1.
+          const row = { source: isLegacyBaseline ? "V2 (Migrated)" : "V2 (New)", rewardLevel: `R${index}`, achievedAt: formatTimestamp(achievedAtValue), totalRewardAmount: formatEther4(totalReward), monthlyRewardAmount: formatEther4(rewardAmounts[index] * E18), installmentCount: `${released}/${rewardInstallments[index]}`, releasedAmount: formatEther4(releasedAmount), claimedCycles: isLegacyBaseline && legacyScheduleSet ? Number(legacySchedule.paidInstallments) : Number(claimedCycles), claimedAmount: formatEther4(historicClaimed), claimableAmount: formatEther4(claimable), remainingAmount: formatEther4(remainingAmount), nextPayoutAt: formatTimestamp(nextPayoutAt), lastClaimAt: formatTimestamp(lastClaimAt) };
           if (isLegacyBaseline) legacyRows.push(row);
           else v2Rows.push(row);
         }
-        setRows([...legacyRows, ...v2Rows].map((row, index) => ({ ...row, sno: index + 1 })));
+        // Read V1 independently. A V2 R1/R2 row wins over the same V1 rank,
+        // so a migrated user never sees the same reward rank twice.
+        const v2RewardIndexes = new Set(Array.from({ length: count }, (_, offset) => offset + 1));
+        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_REWARD_MANAGER_ABI, provider);
+        const v1Snapshots = await Promise.all(Array.from({ length: 12 }, async (_, offset) => {
+          const index = offset + 1;
+          const [achievedAt, claimed] = await Promise.all([
+            v1Manager.rewardAchievedAt(user, index),
+            v1Manager.rewardClaimedAmountByIndex(user, index),
+          ]);
+          return { index, achievedAt: BigInt(achievedAt), claimed: BigInt(claimed) };
+        }));
+        let v1ReadyTotal = 0n;
+        let v1ClaimedTotal = 0n;
+        const v1Rows = v1Snapshots
+          .filter((item) => item.achievedAt > 0n && !v2RewardIndexes.has(item.index))
+          .map((item) => {
+            const released = releasedCountNow(item.index, item.achievedAt, roiDaySeconds);
+            const installmentAmount = rewardAmounts[item.index] * E18;
+            const totalReward = installmentAmount * rewardInstallments[item.index];
+            const releasedAmount = installmentAmount * released;
+            const claimable = releasedAmount > item.claimed ? releasedAmount - item.claimed : 0n;
+            const remaining = totalReward > releasedAmount ? totalReward - releasedAmount : 0n;
+            const claimedCycles = installmentAmount ? item.claimed / installmentAmount : 0n;
+            const nextPayoutAt = released < rewardInstallments[item.index]
+              ? item.achievedAt + (released * 30n * roiDaySeconds)
+              : 0n;
+            v1ReadyTotal += claimable;
+            v1ClaimedTotal += item.claimed;
+            return { source: "V1 (Legacy)", rewardLevel: `R${item.index}`, achievedAt: formatTimestamp(item.achievedAt), totalRewardAmount: formatEther4(totalReward), monthlyRewardAmount: formatEther4(installmentAmount), installmentCount: `${released}/${rewardInstallments[item.index]}`, releasedAmount: formatEther4(releasedAmount), claimedCycles: Number(claimedCycles), claimedAmount: formatEther4(item.claimed), claimableAmount: formatEther4(claimable), remainingAmount: formatEther4(remaining), nextPayoutAt: formatTimestamp(nextPayoutAt), lastClaimAt: "V1 record" };
+          });
+        setRows([...v1Rows, ...legacyRows, ...v2Rows].map((row, index) => ({ ...row, sno: index + 1 })));
         const latestAt = count ? await registry.rewardAchievedAt(user, count) : 0n;
-        const totalReady = BigInt(rewardReady) + legacyReadyTotal;
-        setCards({ achievedRewardCount: String(count), latestRewardLevel: count ? `R${count}` : "0", latestAchievedAt: formatTimestamp(latestAt), nextRewardIndex: count < 12 ? `R${count + 1}` : "Completed", totalClaimedAmount: formatEther4(claimedTotal), totalClaimableAmount: formatEther4(totalReady), rewardIncomeClaimable: formatEther4(totalReady), nextClaimableIndex: count ? "R1" : "-", unlockedCount: String(unlockedTotal) });
+        const highestV1Index = v1Snapshots.reduce((highest, item) => item.achievedAt > 0n ? item.index : highest, 0);
+        const displayCount = count || highestV1Index;
+        const totalReady = BigInt(rewardReady) + legacyReadyTotal + v1ReadyTotal;
+        setCards({ achievedRewardCount: String(displayCount), latestRewardLevel: displayCount ? `R${displayCount}` : "0", latestAchievedAt: formatTimestamp(latestAt || v1Snapshots[highestV1Index - 1]?.achievedAt), nextRewardIndex: displayCount < 12 ? `R${displayCount + 1}` : "Completed", totalClaimedAmount: formatEther4(claimedTotal + v1ClaimedTotal), totalClaimableAmount: formatEther4(totalReady), rewardIncomeClaimable: formatEther4(totalReady), nextClaimableIndex: displayCount ? "R1" : "-", unlockedCount: String(unlockedTotal) });
       } catch {
         setRows([]);
       } finally { setIsLoading(false); }

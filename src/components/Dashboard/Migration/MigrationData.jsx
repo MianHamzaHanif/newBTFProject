@@ -43,7 +43,9 @@ const V1_REWARD_READER_ABI = [
 const V1_PACKAGE_READER_ABI = [
   "function getStakeHistoryLength(address user) view returns(uint256)",
   "function userStakeHistory(address user,uint256 index) view returns(uint256 packageValue,uint256 usdtAmount,uint256 tokenAmount,uint256 burnAmount,uint256 ownerLockAmount,uint256 userLockAmount,uint256 roiClaimed,uint256 timestamp)",
-  "function getStakeIncomeStatus(address user,uint256 index) view returns(uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool completed)"
+  "function getStakeIncomeStatus(address user,uint256 index) view returns(uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool completed)",
+  "function getStakeRoiInfo(address user,uint256 index) view returns(uint256 principal,uint256 maxRoi,uint256 totalAccrued,uint256 claimed,uint256 claimable)",
+  "function pendingDirectIncomeToken(address user) view returns(uint256)"
 ];
 const V1_REFERRAL_READER_ABI = [
   "function getLevelUsersLength(address upline,uint256 level) view returns(uint256)",
@@ -76,6 +78,26 @@ const LEVEL_BRIDGE_ABI = [
 // The beneficiary address and V1 package index are the only values supplied
 // for package migration. Income values are verified and read from V1 on-chain.
 const initialValues = { user: "", sourceIndex: "" };
+
+const normalizeWalletAddress = (value) => {
+  const trimmed = value.trim();
+  // MetaMask/Explorer copies can have mixed-case but non-checksummed text.
+  // Canonicalize it before ethers validates or sends it to a contract.
+  if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return trimmed;
+  try {
+    return ethers.getAddress(trimmed.toLowerCase());
+  } catch {
+    return trimmed;
+  }
+};
+
+const resolvedWalletAddress = (value) => {
+  const normalized = normalizeWalletAddress(value);
+  if (!ethers.isAddress(normalized)) throw new Error("Enter a valid beneficiary wallet address.");
+  // Lowercase is always accepted by ethers and EVM ABI encoding, including
+  // when a previously persisted UI value had invalid mixed-case checksum.
+  return normalized.toLowerCase();
+};
 
 async function ensureBscMainnet() {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
@@ -114,6 +136,7 @@ export default function MigrationData() {
   const [checkingActivePackages, setCheckingActivePackages] = useState(false);
   const [hasCheckedActivePackages, setHasCheckedActivePackages] = useState(false);
   const [activeV1Packages, setActiveV1Packages] = useState([]);
+  const [activeV1DirectIncome, setActiveV1DirectIncome] = useState(0n);
   const [activePackageCheckError, setActivePackageCheckError] = useState("");
   const [levelBusiness, setLevelBusiness] = useState(Array(15).fill("0"));
   const [refreshingLevelBusiness, setRefreshingLevelBusiness] = useState(false);
@@ -144,11 +167,10 @@ export default function MigrationData() {
     ...current,
     // Wallet addresses are commonly pasted with a trailing space/newline.
     // Keep the beneficiary field clean before any V1 refresh/import check.
-    [field]: field === "user" ? value.trim() : value,
+    [field]: field === "user" ? normalizeWalletAddress(value) : value,
   }));
-  const verifyUser = async (provider) => {
-    if (!ethers.isAddress(values.user)) throw new Error("Enter a valid user wallet address.");
-    const registryUser = await new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, provider).users(values.user);
+  const verifyUser = async (provider, user = resolvedWalletAddress(values.user)) => {
+    const registryUser = await new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, provider).users(user);
     if (!Boolean(registryUser?.exists ?? registryUser?.[8])) throw new Error("Migrate this user's V2 structure first.");
   };
   const authorisedContract = async (address, abi) => {
@@ -282,7 +304,7 @@ export default function MigrationData() {
   const callImport = async () => {
     try {
       if (!window.ethereum) throw new Error("MetaMask or Trust Wallet is not available.");
-      if (!ethers.isAddress(values.user)) throw new Error("Enter a valid user wallet address.");
+      const beneficiary = resolvedWalletAddress(values.user);
       if (!verifiedPackageImport) throw new Error("Verified V1 Package Importer address is not configured for this deployment.");
       const sourceIndexes = values.sourceIndex.split(",").map((value) => BigInt(value.trim()));
       if (!sourceIndexes.length || sourceIndexes.some((value, index) => value < 0n || (index > 0 && value <= sourceIndexes[index - 1]))) {
@@ -290,12 +312,17 @@ export default function MigrationData() {
       }
       setImporting(true);
       setMessage("Reading the V1 package snapshot and checking Registry/DAO authority...");
-      const { contract: importer, provider } = await authorisedVerifiedImporter();
-      await verifyUser(provider);
-      if (await importer.imported(values.user)) throw new Error("Active V1 packages are already imported for this user.");
+      const { contract: importer } = await authorisedVerifiedImporter();
+      // Package snapshots are deliberately imported by the authorised
+      // migration wallet for the beneficiary typed above. Do not block this
+      // operator action in the UI by requiring the beneficiary to connect or
+      // by doing a separate V2-tree preflight here: the importer/manager is
+      // the source of truth and will return its exact on-chain reason if a
+      // prerequisite is still missing.
+      if (await importer.imported(beneficiary)) throw new Error("Active V1 packages are already imported for this user.");
       const tx = sourceIndexes.length === 1
-        ? await importer.importPackage(values.user, sourceIndexes[0])
-        : await importer.importPackages(values.user, sourceIndexes);
+        ? await importer.importPackage(beneficiary, sourceIndexes[0])
+        : await importer.importPackages(beneficiary, sourceIndexes);
       setMessage("Confirm the verified V1-to-V2 package import transaction in your wallet.");
       await tx.wait();
       setMessage(`Verified V1 package index ${sourceIndexes.join(", ")} imported successfully.`);
@@ -317,22 +344,43 @@ export default function MigrationData() {
       setHasCheckedActivePackages(true);
       setActivePackageCheckError("");
       setActiveV1Packages([]);
+      setActiveV1DirectIncome(0n);
       const provider = createV1ReadProvider();
       const legacy = new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_READER_ABI, provider);
-      const historyLength = Number(await legacy.getStakeHistoryLength(values.user));
+      const [historyLengthRaw, currentDirectIncome] = await Promise.all([
+        legacy.getStakeHistoryLength(values.user),
+        legacy.pendingDirectIncomeToken(values.user),
+      ]);
+      const historyLength = Number(historyLengthRaw);
       const packages = await Promise.all(Array.from({ length: historyLength }, async (_, index) => {
-        const [stake, income] = await Promise.all([
+        const [stake, income, roi] = await Promise.all([
           legacy.userStakeHistory(values.user, index),
           legacy.getStakeIncomeStatus(values.user, index),
+          legacy.getStakeRoiInfo(values.user, index),
         ]);
         const packageValue = stake.packageValue ?? stake[0];
         const incomeLimit = income.incomeLimit ?? income[0];
         const usedIncome = income.usedIncome ?? income[1];
         const remainingIncome = income.remainingIncome ?? income[2];
         const completed = income.completed ?? income[3];
+        const selfRoiMaximum = roi.maxRoi ?? roi[1];
+        const selfRoiGenerated = roi.totalAccrued ?? roi[2];
+        const selfRoiClaimed = roi.claimed ?? roi[3];
+        const selfRoiClaimable = roi.claimable ?? roi[4];
         const active = packageValue > 0n && !completed && usedIncome < incomeLimit && remainingIncome === incomeLimit - usedIncome;
-        return active ? { index, packageValue, remainingIncome } : null;
+        return active ? {
+          index,
+          packageValue,
+          incomeLimit,
+          usedIncome,
+          remainingIncome,
+          selfRoiMaximum,
+          selfRoiGenerated,
+          selfRoiClaimed,
+          selfRoiClaimable,
+        } : null;
       }));
+      setActiveV1DirectIncome(currentDirectIncome);
       setActiveV1Packages(packages.filter(Boolean));
     } catch (error) {
       setActivePackageCheckError(error?.shortMessage || error?.message || "V1 active packages read nahi ho sake.");
@@ -644,12 +692,24 @@ export default function MigrationData() {
       <div className="migration-package-check-column">
         <button className="migration-secondary-button" onClick={checkActiveV1Packages} disabled={checkingActivePackages || importing}>{checkingActivePackages ? "Checking..." : "Check Active Packages"}</button>
         {activePackageCheckError && <div className="migration-package-check-error">{activePackageCheckError}</div>}
-        {activeV1Packages.length > 0 && <div className="migration-active-package-results"><p>Active V1 package indexes</p>{activeV1Packages.map((item) => <div className="migration-active-package-item" key={item.index}><strong>Index #{item.index}</strong><span>Package: {ethers.formatUnits(item.packageValue, 18)} USDT</span><span>Remaining: {ethers.formatUnits(item.remainingIncome, 18)} USDT</span></div>)}</div>}
+        {activeV1Packages.length > 0 && <div className="migration-active-package-results"><p>Active V1 package indexes · Current Direct: {ethers.formatUnits(activeV1DirectIncome, 18)} USDT</p>{activeV1Packages.map((item) => <div className="migration-active-package-item" key={item.index}><strong>Index #{item.index}</strong><span>Package: {ethers.formatUnits(item.packageValue, 18)} USDT</span><span>Income Limit: {ethers.formatUnits(item.incomeLimit, 18)} USDT</span><span>Used Income: {ethers.formatUnits(item.usedIncome, 18)} USDT</span><span>Remaining: {ethers.formatUnits(item.remainingIncome, 18)} USDT</span><span>Self ROI: {ethers.formatUnits(item.selfRoiGenerated, 18)} / {ethers.formatUnits(item.selfRoiMaximum, 18)} USDT</span><span>Self ROI Claimed: {ethers.formatUnits(item.selfRoiClaimed, 18)} USDT</span><span>Self ROI Claimable: {ethers.formatUnits(item.selfRoiClaimable, 18)} USDT</span></div>)}</div>}
         {!checkingActivePackages && !activePackageCheckError && activeV1Packages.length === 0 && <p className="migration-panel-note migration-package-empty">{hasCheckedActivePackages ? "No active V1 package found for this beneficiary." : "Check beneficiary's active V1 packages."}</p>}
       </div>
       <div className="migration-package-import-column">
         <Field label="Active V1 Package Index / Indexes" value={values.sourceIndex} onChange={(value) => setValue("sourceIndex", value)} placeholder="e.g. 2 or 6,7" />
-        <div className="migration-actions"><button className="migration-primary-button" onClick={callImport} disabled={importing || !verifiedPackageImport}>{importing ? "Importing..." : "Import Verified V1 Package"}<i className="bi bi-arrow-right" /></button></div>
+        <div className="migration-actions"><button
+          type="button"
+          className="migration-primary-button"
+          onClick={() => {
+            // Show feedback synchronously, before MetaMask/RPC work begins.
+            // This also prevents an enclosing form (present or added later)
+            // from swallowing the click as a browser submit.
+            setMessage("Preparing V1 package import for wallet confirmation...");
+            void callImport();
+          }}
+          disabled={importing || !verifiedPackageImport}
+        >{importing ? "Importing..." : "Import Verified V1 Package"}<i className="bi bi-arrow-right" /></button></div>
+        {message && <div className="migration-message">{message}</div>}
       </div>
     </div>
     <div className="migration-level-panel">
@@ -657,14 +717,14 @@ export default function MigrationData() {
       <p className="migration-panel-note">Enter only active V1 package business for every level. This is a one-time seed and requires the package import first.</p>
       <div className="migration-level-refresh"><button className="migration-secondary-action" onClick={refreshV1LevelBusiness} disabled={refreshingLevelBusiness || importing}>{refreshingLevelBusiness ? "Refreshing V1 Business..." : "Refresh V1 Active Business"}</button>{levelBusinessRefreshError && <span>{levelBusinessRefreshError}</span>}</div>
       <div className="migration-level-grid">{levelBusiness.map((amount, index) => <Field key={index} label={`Level ${index + 1} Business`} suffix="USDT" value={amount} onChange={(value) => setLevelBusiness((current) => current.map((entry, position) => position === index ? value : entry))} placeholder="0" />)}</div>
-      <div className="migration-actions"><button className="migration-secondary-action" onClick={seedLevelBusiness} disabled={importing}>{importing ? "Processing..." : "Call V2 Level Business Seed"}</button></div>
+      <div className="migration-actions"><button className="migration-primary-button" onClick={seedLevelBusiness} disabled={importing}>{importing ? "Processing..." : "Call V2 Level Business Seed"}</button></div>
     </div>
     <div className="migration-level-panel">
       <div className="migration-section-title"><span>4</span> Pending Level ROI</div>
       <p className="migration-panel-note">Refresh V1 to read every currently open level and its pending ROI. The batch import reads V1 again on-chain and imports all open-level amounts in one transaction.</p>
       <div className="migration-level-refresh"><button className="migration-secondary-action" onClick={refreshV1PendingLevelRoi} disabled={refreshingPendingLevelRoi || importing}>{refreshingPendingLevelRoi ? "Refreshing V1 ROI..." : "Refresh V1 Pending Level ROI"}</button>{pendingLevelRoiError && <span>{pendingLevelRoiError}</span>}</div>
       {pendingLevelRoiRefreshed && <><div className="migration-pending-roi-summary"><span>Open Levels: {openV1Levels.filter(Boolean).length}</span><strong>Total Pending Level ROI: {ethers.formatUnits(pendingLevelRoi.reduce((total, amount) => total + ethers.parseUnits(amount || "0", 18), 0n), 18)} USDT</strong></div><div className="migration-level-grid">{pendingLevelRoi.map((amount, index) => openV1Levels[index] && <Field key={index} label={`Level ${index + 1} Pending ROI`} suffix="USDT" value={amount} onChange={(value) => setPendingLevelRoi((current) => current.map((entry, position) => position === index ? value : entry))} placeholder="0" />)}</div></>}
-      <div className="migration-actions"><button className="migration-secondary-action" onClick={importPendingLevelRoiBatch} disabled={importing || !verifiedPackageImport || !pendingLevelRoiRefreshed}>{importing ? "Processing..." : "Import All V1 Pending Level ROI"}</button></div>
+      <div className="migration-actions"><button className="migration-primary-button" onClick={importPendingLevelRoiBatch} disabled={importing || !verifiedPackageImport || !pendingLevelRoiRefreshed}>{importing ? "Processing..." : "Import All V1 Pending Level ROI"}</button></div>
     </div>
     <div className="migration-level-panel">
       <div className="migration-section-title"><span>5</span> Verified V1 Power & Reward Income</div>
