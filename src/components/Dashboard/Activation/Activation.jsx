@@ -78,10 +78,14 @@ export const Activation = () => {
               const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n);
               const maximum = BigInt(roi?.maxRoi ?? roi?.[1] ?? 0n);
               const generated = BigInt(roi?.totalAccrued ?? roi?.[2] ?? 0n);
+              const completed = Boolean(income?.completed ?? income?.[3]);
               return {
                 v1Index: index, amount, timestamp: BigInt(stake?.timestamp ?? stake?.[7] ?? 0n), maximum, generated,
                 claimable: BigInt(roi?.claimable ?? roi?.[4] ?? 0n), incomeLimit: BigInt(income?.incomeLimit ?? income?.[0] ?? 0n),
-                active: maximum > 0n && generated < maximum,
+                // The V1 income-cap completion flag is the real package
+                // state. Self ROI may be below its own cap even though this
+                // package has already completed its overall income limit.
+                active: !completed,
               };
             }));
             return { records, oneDay: BigInt(oneDay ?? 86400n) };
@@ -127,13 +131,13 @@ export const Activation = () => {
 
         const viewRows = [
           ...visibleV1.map((record) => ({
-            ...record, packageIndex: record.v1Index + 1, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp),
-            roiMaximum: formatUsdt(record.maximum), status: record.active ? "V1 Active - ROI Running" : "V1 - Self ROI Complete", roiStatus: record.active ? "Yes" : "No",
+            ...record, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp),
+            roiMaximum: formatUsdt(record.maximum), status: record.active ? "V1 Active - ROI Running" : "V1 Inactive - Package Limit Completed", roiStatus: record.active ? "Yes" : "No",
           })),
           ...v2.records.map((record) => {
             const roiActive = record.active && record.generated < record.maximum;
             return {
-              ...record, packageIndex: record.v2Index + 1, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp), roiMaximum: formatUsdt(record.maximum),
+              ...record, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp), roiMaximum: formatUsdt(record.maximum),
               status: record.active ? (roiActive ? "V2 Active - ROI Running" : "V2 Active - Self ROI Complete") : "V2 Inactive", roiStatus: roiActive ? "Yes" : "No",
             };
           }),
@@ -165,7 +169,7 @@ export const Activation = () => {
   }, []);
 
   const columns = [
-    { id: "sno", label: "S. No", sortable: true }, { id: "packageIndex", label: "Package Index", sortable: true },
+    { id: "sno", label: "S. No", sortable: true },
     { id: "packageAmount", label: "Package Amount", sortable: true }, { id: "purchasedAt", label: "Purchased At", sortable: true },
     { id: "roiMaximum", label: "Self ROI 3x Limit", sortable: true }, { id: "status", label: "Package Status", sortable: true },
     { id: "roiStatus", label: "Self ROI Active", sortable: true },
@@ -186,7 +190,7 @@ export const Activation = () => {
       {isLoading && <p className="team-loading">Loading V1 + V2 package details...</p>}
       {!isLoading && message && <p className="team-loading">{message}</p>}
       <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
-        <TableCell align="center">{row.sno}</TableCell><TableCell align="center">#{row.packageIndex}</TableCell><TableCell align="center">{row.packageAmount}</TableCell>
+        <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.packageAmount}</TableCell>
         <TableCell align="center">{row.purchasedAt}</TableCell><TableCell align="center">{row.roiMaximum}</TableCell><TableCell align="center">{row.status}</TableCell><TableCell align="center">{row.roiStatus}</TableCell>
       </>} />
     </div></div>
