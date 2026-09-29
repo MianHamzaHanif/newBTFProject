@@ -255,7 +255,7 @@ const DashboardBottom = () => {
           setReferralLink("");
         }
         setDataStatus(v2IsRegistered || v1IsRegistered
-          ? ""
+          ? `Loaded V1 + V2 dashboard data for ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}.`
           : "This connected wallet is not registered in either V1 or V2.");
       } catch (error) {
         setStats({
