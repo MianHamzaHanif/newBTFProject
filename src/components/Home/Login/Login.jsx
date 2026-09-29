@@ -19,7 +19,6 @@ const Login = () => {
   const [isRegistering, setIsRegistering] = useState(false);
   const loginCheckVersion = useRef(0);
   const [registrationStatus, setRegistrationStatus] = useState("idle");
-  const [canViewMigration, setCanViewMigration] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "", show: false });
   const [registerMessage, setRegisterMessage] = useState({
     text: "",
@@ -89,13 +88,17 @@ const Login = () => {
         return;
       }
 
-      const userData = await readRegistration("users", address);
+      const [userData, hasMigrationAccess] = await Promise.all([
+        readRegistration("users", address),
+        canAccessMigration(address),
+      ]);
       const isRegistered = userData?.exists ?? userData?.[8] ?? false;
 
       if (version === loginCheckVersion.current) {
         setRegistrationStatus(isRegistered ? "registered" : "unregistered");
         setRegisterMessage({ text: "", type: "" });
         if (isRegistered) navigate("/dashboard", { replace: true });
+        else if (hasMigrationAccess) navigate("/migration-data", { replace: true });
       }
     } catch (error) {
       if (version !== loginCheckVersion.current) return;
@@ -137,18 +140,9 @@ const Login = () => {
     ++loginCheckVersion.current;
     setRegistrationStatus("idle");
     setWalletAddress("");
-    setCanViewMigration(false);
     clearRememberedWalletAddress();
     setRegisterMessage({ text: "", type: "" });
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    canAccessMigration(walletAddress).then((allowed) => {
-      if (!cancelled) setCanViewMigration(allowed);
-    });
-    return () => { cancelled = true; };
-  }, [walletAddress]);
 
   const handleRegister = async () => {
     if (isRegistering || registrationStatus !== "unregistered") return;
@@ -375,11 +369,6 @@ const Login = () => {
               <button onClick={handleRegister} disabled={isRegistering || registrationStatus !== "unregistered"}>
                 {isRegistering ? "Registering..." : "Register"}
               </button>
-              )}
-              {registrationStatus === "unregistered" && canViewMigration && (
-                <button className="disconnect-btn" onClick={() => navigate("/migration-data")}>
-                  View Migration Data
-                </button>
               )}
               {registerMessage.text && (
                 <p className={`register-message ${registerMessage.type}`}>
