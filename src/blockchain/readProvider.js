@@ -49,6 +49,9 @@ const makeReadProvider = (url) => {
 const bscReadProvider = new ethers.FallbackProvider([
   { provider: makeReadProvider(BSC_MAINNET.rpcUrls[1]), priority: 1, stallTimeout: 1_200, weight: 1 },
   { provider: makeReadProvider(BSC_MAINNET.rpcUrls[0]), priority: 2, stallTimeout: 2_000, weight: 1 },
-], 1);
+// The fallback wrapper must be pinned too. Without this second argument it
+// auto-detects its network; a mobile wallet/RPC transition can make it cache
+// chain 1 briefly and then reject the correct BSC (56) reply.
+], BSC_MAINNET.chainId, { quorum: 1 });
 
 export const createBscReadProvider = () => bscReadProvider;
