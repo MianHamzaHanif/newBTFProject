@@ -15,8 +15,8 @@ import {
   TokenAddress,
   V2LedgerAddress,
 } from "../../blockchain/address";
-import { BSC_MAINNET } from "../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
+import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 
 const TOKEN_LABEL = "USDT";
 
@@ -128,8 +128,28 @@ const DashboardBottom = () => {
           return;
         }
 
-        // V2-only dashboard statistics. Earnings are V2 Ledger credits and
-        // withdrawals are V2 Ledger withdrawal records.
+        // Start V1 and V2 reads together. V1 totals are aggregate contract
+        // fields, so they are fast even for accounts with a long history.
+        const v1Provider = new ethers.JsonRpcProvider(
+          V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true },
+        );
+        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
+        const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, ReferralNetworkABI, v1Provider);
+        const v1SummaryPromise = Promise.all([
+          v1Manager.totalDirectIncomeToken(walletAddress),
+          v1Manager.totalSelfRoiIncomeClaimed(walletAddress),
+          v1Manager.totalLevelRoiClaimed(walletAddress),
+          v1Manager.totalPowerIncomeClaimed(walletAddress),
+          v1Manager.totalRewardIncomeClaimed(walletAddress),
+          v1Manager.totalUsdtSpent(walletAddress),
+          v1Manager.totalIncomeWithdrawnToken(walletAddress),
+          Promise.all(Array.from(
+            { length: 15 },
+            (_, index) => v1Registry.isLevelOpen(walletAddress, index).catch(() => false),
+          )),
+          v1Registry.users(walletAddress),
+        ]);
+
         const v2Provider = createBscReadProvider();
         const v2Token = new ethers.Contract(TokenAddress, [
           "function decimals() view returns (uint8)",
@@ -157,11 +177,23 @@ const DashboardBottom = () => {
         const levelOpenPromise = Promise.all(
           Array.from({ length: 15 }, (_, index) => v2Registry.isLevelOpen(walletAddress, index).catch(() => false))
         );
-        const [incomeRecords, withdrawRecords, levelOpen] = await Promise.all([
+        const [incomeRecords, withdrawRecords, levelOpen, v1Summary] = await Promise.all([
           incomeRecordsPromise,
           withdrawRecordsPromise,
           levelOpenPromise,
+          v1SummaryPromise,
         ]);
+        const [
+          v1DirectIncome,
+          v1SelfRoiIncome,
+          v1LevelRoiIncome,
+          v1PowerIncome,
+          v1RewardIncome,
+          v1Invested,
+          v1Withdrawn,
+          v1LevelOpen,
+          v1UserData,
+        ] = v1Summary;
         const totalsByType = { direct: 0n, roi: 0n, power: 0n, reward: 0n };
         let totalEarned = 0n;
         for (const record of incomeRecords) {
@@ -173,184 +205,49 @@ const DashboardBottom = () => {
           else if (incomeType === 3) totalsByType.power += amount;
           else if (incomeType === 4) totalsByType.reward += amount;
         }
-        const totalWithdrawn = withdrawRecords.reduce((total, record) => total + BigInt(record.amount ?? record[0]), 0n);
-        const v2OpenCount = levelOpen.filter(Boolean).length;
+        const v2Withdrawn = withdrawRecords.reduce((total, record) => total + BigInt(record.amount ?? record[0]), 0n);
+        const v1Earned = BigInt(v1DirectIncome)
+          + BigInt(v1SelfRoiIncome)
+          + BigInt(v1LevelRoiIncome)
+          + BigInt(v1PowerIncome)
+          + BigInt(v1RewardIncome);
+        // Each card represents the same income class across both deployed
+        // contracts. V1's Self + Level ROI map to the V2 ROI card.
+        const combinedByType = {
+          direct: totalsByType.direct + BigInt(v1DirectIncome),
+          roi: totalsByType.roi + BigInt(v1SelfRoiIncome) + BigInt(v1LevelRoiIncome),
+          power: totalsByType.power + BigInt(v1PowerIncome),
+          reward: totalsByType.reward + BigInt(v1RewardIncome),
+        };
+        // A level is logically open once if it is open in either version;
+        // do not double-count the same 15 referral levels.
+        const combinedOpenCount = levelOpen.reduce(
+          (total, isV2Open, index) => total + (isV2Open || v1LevelOpen[index] ? 1 : 0),
+          0,
+        );
         const v2IsRegistered = Boolean(v2UserData.exists ?? v2UserData[8]);
-        setStats({ totalEarned: formatUsd(totalEarned), totalInvested: formatUsd(totalInvested), totalWithdrawn: formatUsd(totalWithdrawn) });
+        const v1IsRegistered = Boolean(v1UserData?.exists ?? v1UserData?.[8])
+          || Number(v1UserData?.id ?? v1UserData?.[0] ?? 0) > 0;
+        setStats({
+          totalEarned: formatUsd(totalEarned + v1Earned),
+          totalInvested: formatUsd(BigInt(totalInvested) + BigInt(v1Invested)),
+          totalWithdrawn: formatUsd(v2Withdrawn + BigInt(v1Withdrawn)),
+        });
         setTokenInfo({ symbol: TOKEN_LABEL, balance: formatToken(v2TokenBalanceRaw, Number(v2TokenDecimals) || 18) });
         setWithdrawnByType({
-          direct: formatToken(totalsByType.direct),
-          roi: formatToken(totalsByType.roi),
-          power: formatToken(totalsByType.power),
-          reward: formatToken(totalsByType.reward),
+          direct: formatToken(combinedByType.direct),
+          roi: formatToken(combinedByType.roi),
+          power: formatToken(combinedByType.power),
+          reward: formatToken(combinedByType.reward),
         });
-        setLevelOpenCount(String(v2OpenCount));
-        if (v2IsRegistered) {
+        setLevelOpenCount(String(combinedOpenCount));
+        if (v2IsRegistered || v1IsRegistered) {
           const origin = window.location.origin;
           const basePath = import.meta.env.BASE_URL || "/";
           setReferralLink(`${origin}${basePath}?ref=${walletAddress.toLowerCase()}`);
         } else {
           setReferralLink("");
         }
-        return;
-
-        // Public data must be read from BSC directly. Some injected wallet
-        // providers reject read calls and made the whole dashboard blank.
-        const provider = new ethers.JsonRpcProvider(
-          BSC_MAINNET.rpcUrls[1],
-          BSC_MAINNET.chainId,
-          { staticNetwork: true },
-        );
-        const tokenContract = new ethers.Contract(
-          TokenAddress,
-          [
-            "function symbol() view returns (string)",
-            "function decimals() view returns (uint8)",
-            "function balanceOf(address owner) view returns (uint256)",
-          ],
-          provider,
-        );
-        const packageManager = new ethers.Contract(
-          PackageManagerAddress,
-          PackageManagerABI,
-          provider,
-        );
-        const referralNetwork = new ethers.Contract(
-          ReferralNetworkAddress,
-          ReferralNetworkABI,
-          provider,
-        );
-
-        const [
-          totalDirectIncomeToken,
-          totalSelfRoiIncomeClaimed,
-          totalLevelRoiClaimed,
-          totalPowerIncomeClaimed,
-          totalRewardIncomeClaimed,
-          totalUsdtSpent,
-          totalIncomeWithdrawnToken,
-        ] = await Promise.all([
-          packageManager.totalDirectIncomeToken(walletAddress),
-          packageManager.totalSelfRoiIncomeClaimed(walletAddress),
-          packageManager.totalLevelRoiClaimed(walletAddress),
-          packageManager.totalPowerIncomeClaimed(walletAddress),
-          packageManager.totalRewardIncomeClaimed(walletAddress),
-          packageManager.totalUsdtSpent(walletAddress),
-          packageManager.totalIncomeWithdrawnToken(walletAddress),
-        ]);
-
-        const totalEarnedRaw =
-          (totalDirectIncomeToken ?? 0n) +
-          (totalSelfRoiIncomeClaimed ?? 0n) +
-          (totalLevelRoiClaimed ?? 0n) +
-          (totalPowerIncomeClaimed ?? 0n) +
-          (totalRewardIncomeClaimed ?? 0n);
-
-        const [, tokenDecimals, tokenBalanceRaw, userData] = await Promise.all([
-          tokenContract.symbol(),
-          tokenContract.decimals(),
-          tokenContract.balanceOf(walletAddress),
-          referralNetwork.users(walletAddress),
-        ]);
-
-        const isRegistered =
-          Boolean(userData?.exists ?? userData?.[8]) ||
-          Number(userData?.id ?? userData?.[0] ?? 0) > 0;
-
-        // Do not wait for every old withdrawal record before showing the
-        // principal dashboard values.
-        setStats({
-          totalEarned: formatUsd(totalEarnedRaw),
-          totalInvested: formatUsd(totalUsdtSpent),
-          totalWithdrawn: formatUsd(totalIncomeWithdrawnToken),
-        });
-        setTokenInfo({
-          symbol: TOKEN_LABEL,
-          balance: Number(
-            ethers.formatUnits(tokenBalanceRaw ?? 0n, Number(tokenDecimals) || 18),
-          ).toLocaleString(undefined, {
-            minimumFractionDigits: 4,
-            maximumFractionDigits: 4,
-          }),
-        });
-        if (isRegistered) {
-          const origin = window.location.origin;
-          const basePath = import.meta.env.BASE_URL || "/";
-          setReferralLink(`${origin}${basePath}?ref=${walletAddress.toLowerCase()}`);
-        } else {
-          setReferralLink("");
-        }
-
-        try {
-          const withdrawRecordsLengthRaw =
-            await referralNetwork.getUserIncomeWithdrawRecordsLength(walletAddress);
-          const withdrawRecordsLength = Number(withdrawRecordsLengthRaw ?? 0n);
-          const totalsByType = { direct: 0n, roi: 0n, power: 0n, reward: 0n };
-
-          const records = await Promise.all(
-            Array.from({ length: withdrawRecordsLength }, (_, index) =>
-              referralNetwork.getUserIncomeWithdrawRecordAt(walletAddress, index),
-            ),
-          );
-          for (const record of records) {
-            const incomeType = Number(record?.incomeType ?? record?.[1] ?? 0);
-            const amount = BigInt(record?.amount ?? record?.[2] ?? 0n);
-            if (incomeType === 0) totalsByType.direct += amount;
-            else if (incomeType === 1 || incomeType === 2) totalsByType.roi += amount;
-            else if (incomeType === 3) totalsByType.power += amount;
-            else if (incomeType === 4) totalsByType.reward += amount;
-          }
-
-          setWithdrawnByType({
-            direct: formatToken(totalsByType.direct, Number(tokenDecimals) || 18),
-            roi: formatToken(totalsByType.roi, Number(tokenDecimals) || 18),
-            power: formatToken(totalsByType.power, Number(tokenDecimals) || 18),
-            reward: formatToken(totalsByType.reward, Number(tokenDecimals) || 18),
-          });
-        } catch {
-          setWithdrawnByType({ direct: "0.0000", roi: "0.0000", power: "0.0000", reward: "0.0000" });
-        }
-
-        let openCount = 0;
-        try {
-          // As requested: loop only 0..14 and count true values.
-          // Per-level try/catch so one revert does not zero-out all results.
-          for (let idx = 0; idx < 15; idx += 1) {
-            try {
-              const isOpen = await referralNetwork.isLevelOpen(walletAddress, idx);
-              if (isOpen) {
-                openCount += 1;
-              }
-            } catch {
-              // Ignore per-level failures and continue checking other levels.
-            }
-          }
-
-          if (openCount === 0) {
-            const latestBlock = await provider.getBlock("latest");
-            const atTimestamp = Number(
-              latestBlock?.timestamp ?? Math.floor(Date.now() / 1000),
-            );
-            for (let idx = 0; idx < 15; idx += 1) {
-              try {
-                const isOpenAt = await referralNetwork.isLevelOpenAt(
-                  walletAddress,
-                  idx,
-                  atTimestamp,
-                );
-                if (isOpenAt) {
-                  openCount += 1;
-                }
-              } catch {
-                // Ignore per-level failures and continue.
-              }
-            }
-          }
-        } catch {
-          openCount = 0;
-        }
-
-        setLevelOpenCount(String(openCount));
       } catch {
         setStats({
           totalEarned: "0.00 USD",

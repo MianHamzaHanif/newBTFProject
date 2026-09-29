@@ -626,7 +626,7 @@ export default function MigrationData() {
   };
 
   if (!accessChecked) return <div className="page-container migration-page"><div className="migration-form-shell"><p className="migration-panel-note">Checking migration access...</p></div></div>;
-  if (!canViewMigration) return <div className="page-container migration-page"><div className="migration-form-shell"><div className="migration-form-heading"><div className="migration-form-icon"><i className="bi bi-shield-lock" /></div><div><h1>Migration Access Restricted</h1><p>Only the V2 Registry owner or a wallet with <code>migrationOperator = true</code> can view and use Migration Data.</p></div></div></div></div>;
+  if (!canViewMigration) return <div className="page-container migration-page"><div className="migration-form-shell"><div className="migration-form-heading"><div className="migration-form-icon"><i className="bi bi-shield-lock" /></div><div><h1>Migration Access Restricted</h1><p>Only the V2 Registry owner, a wallet with <code>migrationOperator = true</code>, or an approved migrated-wallet viewer can view Migration Data.</p></div></div></div></div>;
 
   return <div className="page-container migration-page"><div className="migration-form-shell">
     <div className="migration-form-heading"><div className="migration-form-icon"><i className="bi bi-arrow-left-right" /></div><div><h1>Migration Data</h1><p>V1 package, Power and Reward values are verified on-chain before V2 import.</p></div></div>

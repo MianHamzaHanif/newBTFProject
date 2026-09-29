@@ -17,6 +17,7 @@ import {
   V2LedgerAddress,
 } from "../../blockchain/address";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscMainnetConfig";
+import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 
 const DashboardTop = () => {
@@ -109,8 +110,68 @@ const DashboardTop = () => {
       return;
     }
 
+    const loadV1PlanActivity = async (walletAddress) => {
+      const provider = new ethers.JsonRpcProvider(
+        V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true },
+      );
+      const packageManager = new ethers.Contract(
+        V1_MAINNET.packageManager,
+        PackageManagerABI,
+        provider,
+      );
+      const [lengthRaw, oneDayRaw, latestBlock] = await Promise.all([
+        packageManager.getStakeHistoryLength(walletAddress),
+        packageManager.oneDay(),
+        provider.getBlock("latest"),
+      ]);
+      const length = Number(lengthRaw ?? 0n);
+      const oneDaySeconds = Number(oneDayRaw ?? 86400n) || 86400;
+      const nowTs = Number(latestBlock?.timestamp ?? Math.floor(Date.now() / 1000));
+
+      let activeIndex = -1;
+      let activeInfo = null;
+      for (let index = 0; index < length; index += 1) {
+        const roiInfo = await packageManager.getStakeRoiInfo(walletAddress, index);
+        const maxRoi = BigInt(roiInfo?.maxRoi ?? roiInfo?.[1] ?? 0n);
+        const totalAccrued = BigInt(roiInfo?.totalAccrued ?? roiInfo?.[2] ?? 0n);
+        if (maxRoi > 0n && totalAccrued < maxRoi) {
+          activeIndex = index;
+          activeInfo = roiInfo;
+          break;
+        }
+      }
+
+      if (activeIndex < 0 || !activeInfo) {
+        setPlanActivity({
+          progressText: length > 0 ? "100% / 100%" : "0% / 0%",
+          activeStakeLabel: length > 0 ? "All V1 packages completed" : "No active package",
+          selfRoiReadyLabel: "",
+          remainingSeconds: 0,
+        });
+        return;
+      }
+
+      const stake = await packageManager.userStakeHistory(walletAddress, activeIndex);
+      const principal = BigInt(activeInfo?.principal ?? activeInfo?.[0] ?? 0n);
+      const maxRoi = BigInt(activeInfo?.maxRoi ?? activeInfo?.[1] ?? 0n);
+      const totalAccrued = BigInt(activeInfo?.totalAccrued ?? activeInfo?.[2] ?? 0n);
+      const stakeTimestamp = Number(stake?.timestamp ?? stake?.[7] ?? 0n);
+      const packageValue = stake?.packageValue ?? stake?.[0] ?? 0n;
+      const elapsedSinceStake = Math.max(0, nowTs - stakeTimestamp);
+      const cycleProgress = elapsedSinceStake % oneDaySeconds;
+
+      setPlanActivity({
+        // Legacy plan formula: accrued ROI / ROI cap, then ROI cap / principal.
+        progressText: `${toPercent2(totalAccrued, maxRoi)}% / ${toPercent2(maxRoi, principal)}%`,
+        activeStakeLabel: `V1 Active: ${formatEther2(packageValue)} USDT (Package #${activeIndex + 1})`,
+        selfRoiReadyLabel: "",
+        remainingSeconds: stakeTimestamp > 0
+          ? (cycleProgress === 0 ? oneDaySeconds : oneDaySeconds - cycleProgress)
+          : 0,
+      });
+    };
+
     try {
-      // V2-only dashboard plan data.
       const wallet = await getReadWalletAddress();
       if (!wallet || !ethers.isAddress(wallet)) throw new Error("WALLET");
       const v2Provider = createBscReadProvider();
@@ -131,12 +192,7 @@ const DashboardTop = () => {
         v2Manager.roiStartTime(),
       ]);
       if (BigInt(currentPackage) === 0n || BigInt(totalIncomeLimit) === 0n) {
-        setPlanActivity({
-          progressText: "0% / 0%",
-          activeStakeLabel: "No active package",
-          selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfRoiReady)} USDT`,
-          remainingSeconds: 0,
-        });
+        await loadV1PlanActivity(wallet);
         return;
       }
       const packageHistory = await Promise.all(
@@ -198,94 +254,6 @@ const DashboardTop = () => {
         activeStakeLabel: `Active income limit: ${formatEther2(activeIncomeLimit)} USDT`,
         selfRoiReadyLabel: "",
         remainingSeconds: v2RemainingSeconds,
-      });
-      return;
-
-      const walletAddress = await getReadWalletAddress();
-
-      if (!walletAddress || !ethers.isAddress(walletAddress)) {
-        setPlanActivity({
-          progressText: "0% / 0%",
-          activeStakeLabel: "No active package",
-          selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
-          remainingSeconds: 0,
-        });
-        return;
-      }
-
-      const provider = new ethers.JsonRpcProvider(
-        BSC_MAINNET.rpcUrls[1], BSC_MAINNET.chainId, { staticNetwork: true },
-      );
-      const packageManager = new ethers.Contract(
-        PackageManagerAddress,
-        PackageManagerABI,
-        provider,
-      );
-      const packageManagerLens = new ethers.Contract(
-        PackageManagerLensAddress,
-        PackageManagerLensABI,
-        provider,
-      );
-
-      const [lengthRaw, oneDayRaw, latestBlock] = await Promise.all([
-        packageManagerLens.getStakeHistoryLength(walletAddress),
-        packageManager.oneDay(),
-        provider.getBlock("latest"),
-      ]);
-
-      const length = Number(lengthRaw ?? 0n);
-      const oneDaySeconds = Number(oneDayRaw ?? 86400n) || 86400;
-      const nowTs = Number(latestBlock?.timestamp ?? Math.floor(Date.now() / 1000));
-
-      let activeIndex = -1;
-      let activeInfo = null;
-
-      for (let index = 0; index < length; index += 1) {
-        const roiInfo = await packageManager.getStakeRoiInfo(walletAddress, index);
-        const maxRoi = BigInt(roiInfo?.maxRoi ?? roiInfo?.[1] ?? 0n);
-        const totalAccrued = BigInt(roiInfo?.totalAccrued ?? roiInfo?.[2] ?? 0n);
-
-        if (maxRoi > 0n && totalAccrued < maxRoi) {
-          activeIndex = index;
-          activeInfo = roiInfo;
-          break;
-        }
-      }
-
-      if (activeIndex < 0 || !activeInfo) {
-        setPlanActivity({
-          progressText: "100% / 100%",
-          activeStakeLabel: "All packages completed",
-          selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
-          remainingSeconds: 0,
-        });
-        return;
-      }
-
-      const stake = await packageManagerLens.getStakeHistoryAt(walletAddress, activeIndex);
-      const stakeTimestamp = Number(stake?.timestamp ?? stake?.[7] ?? 0n);
-      const packageValue = stake?.packageValue ?? stake?.[0] ?? 0n;
-
-      const principal = BigInt(activeInfo?.principal ?? activeInfo?.[0] ?? 0n);
-      const maxRoi = BigInt(activeInfo?.maxRoi ?? activeInfo?.[1] ?? 0n);
-      const totalAccrued = BigInt(activeInfo?.totalAccrued ?? activeInfo?.[2] ?? 0n);
-
-      const achievedPercentText = toPercent2(totalAccrued, maxRoi);
-      const targetPercentText = toPercent2(maxRoi, principal);
-
-      let remainingSeconds = 0;
-      if (stakeTimestamp > 0 && oneDaySeconds > 0) {
-        const elapsedSinceStake = Math.max(0, nowTs - stakeTimestamp);
-        const cycleProgress = elapsedSinceStake % oneDaySeconds;
-        remainingSeconds =
-          cycleProgress === 0 ? oneDaySeconds : Math.max(0, oneDaySeconds - cycleProgress);
-      }
-
-      setPlanActivity({
-        progressText: `${achievedPercentText}% / ${targetPercentText}%`,
-        activeStakeLabel: `Active: ${formatEther2(packageValue)} (Package #${activeIndex + 1})`,
-        selfRoiReadyLabel: "",
-        remainingSeconds,
       });
     } catch {
       setPlanActivity({

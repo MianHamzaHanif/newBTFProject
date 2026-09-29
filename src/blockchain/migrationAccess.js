@@ -10,8 +10,23 @@ const REGISTRY_ACCESS_ABI = [
   "function migrationOperator(address) view returns(bool)",
 ];
 
+// Confirmed migrated-wallet viewer. This wallet may enter the dashboard and
+// inspect the Migration Data screen even before it has a V2 registration.
+// Keep operational authority on-chain: owner/migrationOperator remain the
+// normal source of truth for migration administration.
+const MIGRATION_VIEWER_ADDRESSES = new Set([
+  "0x8A4B5d9d6b40883d290EDf27d59aa4a9d31EAbAD".toLowerCase(),
+]);
+
 async function readAccess(address) {
-  if (!ethers.isAddress(address || "")) return { isOwner: false, isRoot: false, isMigrationOperator: false };
+  if (!ethers.isAddress(address || "")) {
+    return {
+      isOwner: false,
+      isRoot: false,
+      isMigrationOperator: false,
+      isMigrationViewer: false,
+    };
+  }
 
   const registry = new ethers.Contract(
     ReferralNetworkAddress,
@@ -28,6 +43,7 @@ async function readAccess(address) {
     isOwner: owner.toLowerCase() === wallet,
     isRoot: root.toLowerCase() === wallet,
     isMigrationOperator,
+    isMigrationViewer: MIGRATION_VIEWER_ADDRESSES.has(wallet),
   };
 }
 
@@ -37,7 +53,7 @@ async function readAccess(address) {
 export async function canAccessMigration(address) {
   try {
     const access = await readAccess(address);
-    return access.isOwner || access.isMigrationOperator;
+    return access.isOwner || access.isMigrationOperator || access.isMigrationViewer;
   } catch {
     // Do not expose the migration interface when the authority cannot be read.
     return false;
@@ -49,7 +65,7 @@ export async function canAccessMigration(address) {
 export async function canAccessDashboardWithoutRegistration(address) {
   try {
     const access = await readAccess(address);
-    return access.isOwner || access.isRoot || access.isMigrationOperator;
+    return access.isOwner || access.isRoot || access.isMigrationOperator || access.isMigrationViewer;
   } catch {
     return false;
   }

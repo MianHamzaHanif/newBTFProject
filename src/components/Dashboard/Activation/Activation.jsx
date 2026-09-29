@@ -2,9 +2,11 @@ import { TableCell } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
+import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import { PackageManagerAddress } from "../../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
 
 const formatUsdt = (value) => {
@@ -25,6 +27,13 @@ const incomeLimitForPackage = (amount) => {
   if (packageAmount === ethers.parseEther("500")) return ethers.parseEther("3500");
   if (packageAmount === ethers.parseEther("1000")) return ethers.parseEther("10000");
   return 0n;
+};
+
+const percent = (numerator, denominator) => {
+  const top = BigInt(numerator ?? 0n);
+  const bottom = BigInt(denominator ?? 0n);
+  if (bottom <= 0n) return "0.00";
+  return (Number((top * 10000n) / bottom) / 100).toFixed(2);
 };
 
 export const Activation = () => {
@@ -50,6 +59,84 @@ export const Activation = () => {
           return;
         }
 
+        const loadV1Activation = async () => {
+          const v1Provider = new ethers.JsonRpcProvider(
+            V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true },
+          );
+          const v1Manager = new ethers.Contract(
+            V1_MAINNET.packageManager,
+            PackageManagerABI,
+            v1Provider,
+          );
+          const [lengthRaw, oneDayRaw] = await Promise.all([
+            v1Manager.getStakeHistoryLength(user),
+            v1Manager.oneDay(),
+          ]);
+          const historyLength = Number(lengthRaw ?? 0n);
+          if (historyLength === 0) {
+            setRows([]);
+            setSummary(null);
+            setMessage("No V1 or V2 package has been purchased yet.");
+            return;
+          }
+
+          const legacyPackages = await Promise.all(
+            Array.from({ length: historyLength }, async (_, index) => {
+              const [stake, roi] = await Promise.all([
+                v1Manager.userStakeHistory(user, index),
+                v1Manager.getStakeRoiInfo(user, index),
+              ]);
+              return { stake, roi };
+            }),
+          );
+          const totalPackageValue = legacyPackages.reduce(
+            (total, { stake }) => total + BigInt(stake?.packageValue ?? stake?.[0] ?? 0n),
+            0n,
+          );
+          const activePackages = legacyPackages.filter(({ roi }) => {
+            const maxRoi = BigInt(roi?.maxRoi ?? roi?.[1] ?? 0n);
+            const totalAccrued = BigInt(roi?.totalAccrued ?? roi?.[2] ?? 0n);
+            return maxRoi > 0n && totalAccrued < maxRoi;
+          });
+          const sum = (entries, read) => entries.reduce((total, entry) => total + read(entry), 0n);
+          const principal = sum(activePackages, ({ roi }) => BigInt(roi?.principal ?? roi?.[0] ?? 0n));
+          const maximum = sum(activePackages, ({ roi }) => BigInt(roi?.maxRoi ?? roi?.[1] ?? 0n));
+          const generated = sum(activePackages, ({ roi }) => BigInt(roi?.totalAccrued ?? roi?.[2] ?? 0n));
+          const claimable = sum(activePackages, ({ roi }) => BigInt(roi?.claimable ?? roi?.[4] ?? 0n));
+          const allMaximum = sum(legacyPackages, ({ roi }) => BigInt(roi?.maxRoi ?? roi?.[1] ?? 0n));
+          const rowsWithTime = legacyPackages.map(({ stake, roi }, index) => {
+            const maxRoi = BigInt(roi?.maxRoi ?? roi?.[1] ?? 0n);
+            const totalAccrued = BigInt(roi?.totalAccrued ?? roi?.[2] ?? 0n);
+            const active = maxRoi > 0n && totalAccrued < maxRoi;
+            return {
+              sno: index + 1,
+              packageAmount: formatUsdt(stake?.packageValue ?? stake?.[0]),
+              purchasedAt: Number(stake?.timestamp ?? stake?.[7] ?? 0n) > 0
+                ? new Date(Number(stake?.timestamp ?? stake?.[7]) * 1000).toLocaleString()
+                : "-",
+              roiMaximum: formatUsdt(maxRoi),
+              status: active ? "V1 Active - ROI Running" : "V1 - Self ROI Complete",
+              roiStatus: active ? "Yes" : "No",
+            };
+          });
+
+          setSummary({
+            source: "V1",
+            totalRoiPackageAmount: formatUsdt(totalPackageValue),
+            activePackagesAmount: formatUsdt(principal),
+            roiMaximum: formatUsdt(maximum),
+            roiGenerated: formatUsdt(generated),
+            pendingRoi: formatUsdt(claimable),
+            // V1 has its own ROI cap; this is its equivalent plan limit.
+            allPackagesIncomeLimit: formatUsdt(allMaximum),
+            activePackagesIncomeLimit: formatUsdt(maximum),
+            roiProgress: `${percent(generated, maximum)}% / ${percent(maximum, principal)}%`,
+            roiDay: `${Number(oneDayRaw ?? 86400n) / 60} minutes`,
+          });
+          setRows(rowsWithTime);
+          setMessage("Showing V1 package data because this wallet has no V2 package yet.");
+        };
+
         const provider = createBscReadProvider();
         const packageManager = new ethers.Contract(
           PackageManagerAddress,
@@ -69,9 +156,7 @@ export const Activation = () => {
           ]);
 
         if (totalPackages === 0n) {
-          setRows([]);
-          setSummary(null);
-          setMessage("No V2 package has been purchased yet.");
+          await loadV1Activation();
           return;
         }
 
@@ -140,6 +225,7 @@ export const Activation = () => {
 
         */
         setSummary({
+          source: "V2",
           totalRoiPackageAmount: formatUsdt(totalPackages),
           activePackagesAmount: formatUsdt(roiPrincipal),
           totalPackages: formatUsdt(totalPackages),
@@ -149,6 +235,7 @@ export const Activation = () => {
           pendingRoi: formatUsdt(pendingRoi),
           allPackagesIncomeLimit: formatUsdt(allPackagesIncomeLimit),
           activePackagesIncomeLimit: formatUsdt(activePackagesIncomeLimit),
+          roiProgress: `${percent(roiGenerated, roiMaximum)}% / ${percent(roiMaximum, roiPrincipal)}%`,
           roiDay: `${Number(roiDay) / 60} minutes`
         });
         setRows(rowsWithTime);
@@ -193,6 +280,10 @@ export const Activation = () => {
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Self ROI 3x Limit</p>
             <h4 className="withdrawal-card-value">{summary.roiMaximum}</h4>
+          </div>
+          <div className="withdrawal-card">
+            <p className="withdrawal-card-title">{summary.source} Self ROI Progress / Target</p>
+            <h4 className="withdrawal-card-value">{summary.roiProgress}</h4>
           </div>
           <div className="withdrawal-card">
             <p className="withdrawal-card-title">Overall Income Claim Limit (All Packages)</p>
