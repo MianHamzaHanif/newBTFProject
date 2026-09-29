@@ -3,6 +3,15 @@ import { BSC_MAINNET } from "./bscMainnetConfig";
 
 const WALLET_SESSION_KEY = "btf_connected_wallet";
 
+// On mobile browsers some public BSC RPC requests are dropped even though the
+// same endpoints answer from a server. Vercel's same-origin read-only proxy
+// avoids that browser transport failure; public endpoints remain fallbacks
+// for local development and any proxy outage.
+export const getBscReadRpcUrls = () => {
+  const proxy = typeof window === "undefined" ? "" : `${window.location.origin}/api/bsc-rpc`;
+  return [proxy, BSC_MAINNET.rpcUrls[1], BSC_MAINNET.rpcUrls[0]].filter(Boolean);
+};
+
 export const rememberWalletAddress = (address) => {
   if (typeof window !== "undefined" && ethers.isAddress(address || "")) {
     window.sessionStorage.setItem(WALLET_SESSION_KEY, address);
@@ -46,12 +55,11 @@ const makeReadProvider = (url) => {
   });
 };
 
-const bscReadProvider = new ethers.FallbackProvider([
-  { provider: makeReadProvider(BSC_MAINNET.rpcUrls[1]), priority: 1, stallTimeout: 1_200, weight: 1 },
-  { provider: makeReadProvider(BSC_MAINNET.rpcUrls[0]), priority: 2, stallTimeout: 2_000, weight: 1 },
-// The fallback wrapper must be pinned too. Without this second argument it
-// auto-detects its network; a mobile wallet/RPC transition can make it cache
-// chain 1 briefly and then reject the correct BSC (56) reply.
-], BSC_MAINNET.chainId, { quorum: 1 });
+const bscReadProvider = new ethers.FallbackProvider(getBscReadRpcUrls().map((url, index) => ({
+  provider: makeReadProvider(url),
+  priority: index + 1,
+  stallTimeout: index === 0 ? 3_000 : 1_500,
+  weight: 1,
+})), BSC_MAINNET.chainId, { quorum: 1 });
 
 export const createBscReadProvider = () => bscReadProvider;

@@ -10,7 +10,7 @@ import {
   PackageManagerAddress,
   ReferralNetworkAddress,
 } from "../../../blockchain/address";
-import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { createBscReadProvider, getBscReadRpcUrls, getReadWalletAddress } from "../../../blockchain/readProvider";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
 
@@ -32,10 +32,11 @@ const createV1ReadProvider = () => {
   };
   // Team lists make several back-to-back reads. PublicNode can occasionally
   // drop one mobile request, so V1 reads fail over to the BSC data seed.
-  return new ethers.FallbackProvider([
-    { provider: makeProvider(V1_MAINNET.rpcUrl), priority: 1, stallTimeout: 1_000, weight: 1 },
-    { provider: makeProvider("https://bsc-dataseed.bnbchain.org"), priority: 2, stallTimeout: 1_500, weight: 1 },
-  ], V1_MAINNET.chainId, { quorum: 1 });
+  const urls = [getBscReadRpcUrls()[0], V1_MAINNET.rpcUrl, "https://bsc-dataseed.bnbchain.org"]
+    .filter((url, index, all) => Boolean(url) && all.indexOf(url) === index);
+  return new ethers.FallbackProvider(urls.map((url, index) => ({
+    provider: makeProvider(url), priority: index + 1, stallTimeout: index === 0 ? 3_000 : 1_500, weight: 1,
+  })), V1_MAINNET.chainId, { quorum: 1 });
 };
 
 const readInBatches = async (items, read, batchSize = 4) => {
