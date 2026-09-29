@@ -47,6 +47,7 @@ const DashboardTop = () => {
     blocked: false,
     effectiveRemaining: 0n,
   });
+  const [isPlanLoading, setIsPlanLoading] = useState(false);
 
   const formatNumber2 = (value) => {
     const num = Number(value);
@@ -100,6 +101,7 @@ const DashboardTop = () => {
   };
 
   const loadPlanActivity = useCallback(async () => {
+    setIsPlanLoading(true);
     if (!window.ethereum) {
       setPlanActivity({
         progressText: "0% / 0%",
@@ -107,6 +109,7 @@ const DashboardTop = () => {
         selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
         remainingSeconds: 0,
       });
+      setIsPlanLoading(false);
       return;
     }
 
@@ -262,6 +265,8 @@ const DashboardTop = () => {
         selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
         remainingSeconds: 0,
       });
+    } finally {
+      setIsPlanLoading(false);
     }
   }, []);
 
@@ -824,9 +829,9 @@ const DashboardTop = () => {
         <img src={circleimg} alt="" />
         <p className="small-title">Plan Percentage</p>
         <h3 className="upgrade">
-          <span>{planActivity.progressText}</span>
+          <span>{isPlanLoading ? "Loading V1 + V2..." : planActivity.progressText}</span>
         </h3>
-        <p className="small-title">{planActivity.activeStakeLabel}</p>
+        <p className="small-title">{isPlanLoading ? "Reading active package data" : planActivity.activeStakeLabel}</p>
 
         {/*
         <div className="timer">

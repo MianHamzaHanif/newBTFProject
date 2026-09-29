@@ -40,6 +40,7 @@ const DashboardBottom = () => {
   });
   const [levelOpenCount, setLevelOpenCount] = useState("0");
   const [dataStatus, setDataStatus] = useState("");
+  const [isDashboardLoading, setIsDashboardLoading] = useState(false);
 
   const AvailableBalance = [
     {
@@ -124,6 +125,7 @@ const DashboardBottom = () => {
       }
 
       try {
+        setIsDashboardLoading(true);
         const walletAddress = await getReadWalletAddress();
 
         if (!walletAddress || !ethers.isAddress(walletAddress)) {
@@ -274,6 +276,8 @@ const DashboardBottom = () => {
         });
         setLevelOpenCount("0");
         setDataStatus(error?.shortMessage || error?.message || "Could not read dashboard data from BSC. Refresh and try again.");
+      } finally {
+        setIsDashboardLoading(false);
       }
     };
 
@@ -365,6 +369,7 @@ const DashboardBottom = () => {
       </div>
 
       <div className="dashboard-bottom-wrapper">
+        {isDashboardLoading && <p className="team-loading" style={{ gridColumn: "1 / -1" }}>Loading V1 + V2 dashboard data...</p>}
         {dataStatus && <p className="team-loading" style={{ gridColumn: "1 / -1" }}>{dataStatus}</p>}
         <div className="affiliate-section">
           {/* <div className="affiliate-header">
