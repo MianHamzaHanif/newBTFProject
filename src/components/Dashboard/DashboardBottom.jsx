@@ -39,6 +39,7 @@ const DashboardBottom = () => {
     reward: "0.0000",
   });
   const [levelOpenCount, setLevelOpenCount] = useState("0");
+  const [dataStatus, setDataStatus] = useState("");
 
   const AvailableBalance = [
     {
@@ -118,6 +119,7 @@ const DashboardBottom = () => {
   useEffect(() => {
     const loadDashboardData = async () => {
       if (!window.ethereum) {
+        setDataStatus("Connect your BSC wallet to load V1 + V2 dashboard data.");
         return;
       }
 
@@ -125,8 +127,10 @@ const DashboardBottom = () => {
         const walletAddress = await getReadWalletAddress();
 
         if (!walletAddress || !ethers.isAddress(walletAddress)) {
+          setDataStatus("Wallet account is not connected. Reconnect the registered wallet to load data.");
           return;
         }
+        setDataStatus("Loading V1 + V2 data...");
 
         // Start V1 and V2 reads together. V1 totals are aggregate contract
         // fields, so they are fast even for accounts with a long history.
@@ -148,7 +152,7 @@ const DashboardBottom = () => {
             (_, index) => v1Registry.isLevelOpen(walletAddress, index).catch(() => false),
           )),
           v1Registry.users(walletAddress),
-        ]);
+        ]).catch(() => [0n, 0n, 0n, 0n, 0n, 0n, 0n, Array(15).fill(false), null]);
 
         const v2Provider = createBscReadProvider();
         const v2Token = new ethers.Contract(TokenAddress, [
@@ -248,7 +252,10 @@ const DashboardBottom = () => {
         } else {
           setReferralLink("");
         }
-      } catch {
+        setDataStatus(v2IsRegistered || v1IsRegistered
+          ? ""
+          : "This connected wallet is not registered in either V1 or V2.");
+      } catch (error) {
         setStats({
           totalEarned: "0.00 USD",
           totalInvested: "0.00 USD",
@@ -266,6 +273,7 @@ const DashboardBottom = () => {
           reward: "0.0000",
         });
         setLevelOpenCount("0");
+        setDataStatus(error?.shortMessage || error?.message || "Could not read dashboard data from BSC. Refresh and try again.");
       }
     };
 
@@ -357,6 +365,7 @@ const DashboardBottom = () => {
       </div>
 
       <div className="dashboard-bottom-wrapper">
+        {dataStatus && <p className="team-loading" style={{ gridColumn: "1 / -1" }}>{dataStatus}</p>}
         <div className="affiliate-section">
           {/* <div className="affiliate-header">
             <h2>
