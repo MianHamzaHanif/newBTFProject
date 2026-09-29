@@ -27,7 +27,8 @@ const formatTime = (value) => {
   return new Date(timestamp * 1000).toLocaleString();
 };
 const RANK_CHECKPOINT_READ_ABI = [
-  "function getPowerSchedule(address) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)"
+  "function getPowerSchedule(address) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)",
+  "function previewPowerClaimable(address user) view returns(uint256 level,uint256 amount)"
 ];
 
 const card = (title, value, note = "") => (
@@ -107,9 +108,19 @@ export const Income4 = () => {
         }),
       );
 
-      const legacySchedule = await checkpoint.getPowerSchedule(user);
+      const [legacySchedule, legacyPreview] = await Promise.all([
+        checkpoint.getPowerSchedule(user),
+        checkpoint.previewPowerClaimable(user),
+      ]);
       setDetails(powerDetails);
-      setLegacyPower(legacySchedule.set ? legacySchedule : null);
+      setLegacyPower(legacySchedule.set ? {
+        originalAchievedAt: legacySchedule.originalAchievedAt,
+        nextInstallmentAt: legacySchedule.nextInstallmentAt,
+        paidInstallments: legacySchedule.paidInstallments,
+        unpaidAmount: legacySchedule.unpaidAmount,
+        level: legacySchedule.level,
+        claimableAmount: legacyPreview[1],
+      } : null);
       setLevelDetails(levels);
       setPowerTiming({ now: BigInt(latestBlock?.timestamp ?? 0), roiDay: BigInt(roiDay ?? 120n) });
       setRegistryAchievementAt(achievedAt);
@@ -135,7 +146,7 @@ export const Income4 = () => {
   const qualified = formatUsdt(details?.nextQualifiedBusiness);
   const required = formatUsdt(details?.nextRequiredBusiness);
   const powerTime = BigInt(legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt;
-  const powerClaimable = BigInt(details?.claimableAmount ?? 0n) + BigInt(legacyPower?.unpaidAmount ?? 0n);
+  const powerClaimable = BigInt(details?.claimableAmount ?? 0n) + BigInt(legacyPower?.claimableAmount ?? 0n);
   const historyColumns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "level", label: "Power Level", sortable: true },
@@ -182,7 +193,7 @@ export const Income4 = () => {
           formatUsdt(powerClaimable),
           `Released: ${Number(details?.releasedCount ?? 0n)} | Claimed: ${Number(details?.claimedCount ?? 0n)}`,
         )}
-        {legacyPower ? card("V1 Pending Power (Migrated)", formatUsdt(legacyPower.unpaidAmount), `P${legacyPower.level} | Paid: ${legacyPower.paidInstallments}`) : null}
+        {legacyPower ? card("V1 Pending Power (Migrated)", formatUsdt(legacyPower.claimableAmount), `P${legacyPower.level} | Paid: ${legacyPower.paidInstallments}`) : null}
         {card("Power Last Claim At", formatTime(details?.lastClaimAt))}
         {card("Next Achieve Power", nextLevel ? `P${nextLevel}` : "Max achieved")}
         {card(

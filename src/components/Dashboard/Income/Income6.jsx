@@ -5,12 +5,16 @@ import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
-import { PackageManagerAddress, ReferralNetworkAddress } from "../../../blockchain/address";
+import { PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
 
 const E18 = 10n ** 18n;
 const rewardAmounts = [0n, 250n, 500n, 1250n, 2500n, 5000n, 5000n, 5000n, 5000n, 5000n, 5000n, 5000n, 5000n];
 const rewardInstallments = [0n, 1n, 1n, 1n, 1n, 1n, 2n, 4n, 8n, 16n, 32n, 64n, 128n];
 const ROI_DAY_SECONDS = 120n;
+const RANK_CHECKPOINT_READ_ABI = [
+  "function getRewardSchedule(address user,uint256 index) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)",
+  "function previewRewardClaimable(address user,uint256 index) view returns(uint256 amount)"
+];
 
 const formatEther4 = (value) => {
   try {
@@ -57,37 +61,75 @@ export const Income6 = () => {
         const manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
         const incomeLens = new ethers.Contract(await manager.incomeReadyLens(), V2PackageManagerABI, provider);
         const registry = new ethers.Contract(ReferralNetworkAddress, V2ReferralRegistryABI, provider);
-        const [countRaw, rewardReady, roiDayRaw] = await Promise.all([
+        const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, provider);
+        const [countRaw, rewardReady, roiDayRaw, legacyBaseline, legacyBaselineCount] = await Promise.all([
           registry.getAchievedRewardCount(user), incomeLens.getIncomeReady(user, 4), manager.ROI_DAY(),
+          manager.legacyRankBaselineSet(user), manager.legacyRewardBaselineCount(user),
         ]);
         const roiDaySeconds = BigInt(roiDayRaw || ROI_DAY_SECONDS);
         const count = Number(countRaw);
         let claimedTotal = 0n;
         let unlockedTotal = 0n;
+        let legacyReadyTotal = 0n;
         const nextRows = [];
         for (let index = 1; index <= count; index += 1) {
           const [achievedAt, releasedRaw, pending, carried, claimed, claimedCycles, lastClaimAt] = await Promise.all([
             registry.rewardAchievedAt(user, index), manager.rewardReleasedCount(user, index), manager.pendingRewardIncome(user, index), manager.carriedRewardIncome(user, index),
             manager.rewardIncomeClaimedByIndex(user, index), manager.rewardInstallmentsClaimedCount(user, index), manager.rewardLastClaimAt(user, index),
           ]);
-          const achievedAtValue = BigInt(achievedAt);
-          const released = releasedCountNow(index, achievedAtValue, roiDaySeconds);
-          const alreadyReleased = BigInt(releasedRaw);
-          const calculated = released > alreadyReleased ? (released - alreadyReleased) * rewardAmounts[index] * E18 : 0n;
+          let legacySchedule = { set: false, paidInstallments: 0n, originalAchievedAt: 0n, nextInstallmentAt: 0n };
+          let legacyPreview = 0n;
+          try {
+            [legacySchedule, legacyPreview] = await Promise.all([
+              checkpoint.getRewardSchedule(user, index), checkpoint.previewRewardClaimable(user, index),
+            ]);
+          } catch {
+            // Old checkpoints without this optional read method must not
+            // prevent normal V2 Reward details from rendering.
+          }
+          const isLegacyBaseline = legacyBaseline && BigInt(index) <= BigInt(legacyBaselineCount);
+          const legacyScheduleSet = Boolean(legacySchedule.set);
+          const achievedAtValue = isLegacyBaseline && legacyScheduleSet
+            ? BigInt(legacySchedule.originalAchievedAt)
+            : BigInt(achievedAt);
+          let released;
+          let calculated;
+          let nextPayoutAt;
+          if (isLegacyBaseline) {
+            // Baseline ranks must never be recomputed as a new V2 schedule.
+            // The checkpoint is the single source for their V1 remainder.
+            const legacyReady = BigInt(legacyPreview);
+            const paid = legacyScheduleSet ? BigInt(legacySchedule.paidInstallments) : rewardInstallments[index];
+            released = paid + (legacyReady / (rewardAmounts[index] * E18));
+            if (released > rewardInstallments[index]) released = rewardInstallments[index];
+            calculated = legacyReady;
+            nextPayoutAt = legacyScheduleSet && released < rewardInstallments[index]
+              ? BigInt(legacySchedule.nextInstallmentAt)
+              : 0n;
+            legacyReadyTotal += legacyReady;
+          } else {
+            released = releasedCountNow(index, achievedAtValue, roiDaySeconds);
+            const alreadyReleased = BigInt(releasedRaw);
+            calculated = released > alreadyReleased ? (released - alreadyReleased) * rewardAmounts[index] * E18 : 0n;
+            nextPayoutAt = released < rewardInstallments[index]
+              ? achievedAtValue + (released * 30n * roiDaySeconds)
+              : 0n;
+          }
           const claimable = BigInt(pending) + BigInt(carried) + calculated;
           const totalReward = rewardAmounts[index] * rewardInstallments[index] * E18;
           const releasedAmount = released * rewardAmounts[index] * E18;
           const remainingAmount = totalReward > releasedAmount ? totalReward - releasedAmount : 0n;
-          const nextPayoutAt = released < rewardInstallments[index]
-            ? achievedAtValue + (released * 30n * roiDaySeconds)
-            : 0n;
-          claimedTotal += claimed;
+          const historicClaimed = isLegacyBaseline && legacyScheduleSet
+            ? BigInt(claimed) + BigInt(legacySchedule.paidInstallments) * rewardAmounts[index] * E18
+            : BigInt(claimed);
+          claimedTotal += historicClaimed;
           unlockedTotal += released;
-          nextRows.push({ sno: index, rewardLevel: `R${index}`, achievedAt: formatTimestamp(achievedAt), totalRewardAmount: formatEther4(totalReward), monthlyRewardAmount: formatEther4(rewardAmounts[index] * E18), installmentCount: `${released}/${rewardInstallments[index]}`, releasedAmount: formatEther4(releasedAmount), claimedCycles: Number(claimedCycles), claimedAmount: formatEther4(claimed), claimableAmount: formatEther4(claimable), remainingAmount: formatEther4(remainingAmount), nextPayoutAt: formatTimestamp(nextPayoutAt), lastClaimAt: formatTimestamp(lastClaimAt) });
+          nextRows.push({ sno: index, rewardLevel: `R${index}`, achievedAt: formatTimestamp(achievedAtValue), totalRewardAmount: formatEther4(totalReward), monthlyRewardAmount: formatEther4(rewardAmounts[index] * E18), installmentCount: `${released}/${rewardInstallments[index]}`, releasedAmount: formatEther4(releasedAmount), claimedCycles: isLegacyBaseline && legacyScheduleSet ? Number(legacySchedule.paidInstallments) : Number(claimedCycles), claimedAmount: formatEther4(historicClaimed), claimableAmount: formatEther4(claimable), remainingAmount: formatEther4(remainingAmount), nextPayoutAt: formatTimestamp(nextPayoutAt), lastClaimAt: formatTimestamp(lastClaimAt) });
         }
         setRows(nextRows);
         const latestAt = count ? await registry.rewardAchievedAt(user, count) : 0n;
-        setCards({ achievedRewardCount: String(count), latestRewardLevel: count ? `R${count}` : "0", latestAchievedAt: formatTimestamp(latestAt), nextRewardIndex: count < 12 ? `R${count + 1}` : "Completed", totalClaimedAmount: formatEther4(claimedTotal), totalClaimableAmount: formatEther4(rewardReady), rewardIncomeClaimable: formatEther4(rewardReady), nextClaimableIndex: count ? "R1" : "-", unlockedCount: String(unlockedTotal) });
+        const totalReady = BigInt(rewardReady) + legacyReadyTotal;
+        setCards({ achievedRewardCount: String(count), latestRewardLevel: count ? `R${count}` : "0", latestAchievedAt: formatTimestamp(latestAt), nextRewardIndex: count < 12 ? `R${count + 1}` : "Completed", totalClaimedAmount: formatEther4(claimedTotal), totalClaimableAmount: formatEther4(totalReady), rewardIncomeClaimable: formatEther4(totalReady), nextClaimableIndex: count ? "R1" : "-", unlockedCount: String(unlockedTotal) });
       } catch {
         setRows([]);
       } finally { setIsLoading(false); }

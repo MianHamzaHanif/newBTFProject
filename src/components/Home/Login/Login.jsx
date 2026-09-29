@@ -8,6 +8,7 @@ import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscTestnetConfig";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
 import { readRegistration } from "../../../blockchain/registrationReader";
+import { canAccessMigration } from "../../../blockchain/migrationAccess";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -18,6 +19,7 @@ const Login = () => {
   const [isRegistering, setIsRegistering] = useState(false);
   const loginCheckVersion = useRef(0);
   const [registrationStatus, setRegistrationStatus] = useState("idle");
+  const [canViewMigration, setCanViewMigration] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "", show: false });
   const [registerMessage, setRegisterMessage] = useState({
     text: "",
@@ -135,9 +137,18 @@ const Login = () => {
     ++loginCheckVersion.current;
     setRegistrationStatus("idle");
     setWalletAddress("");
+    setCanViewMigration(false);
     clearRememberedWalletAddress();
     setRegisterMessage({ text: "", type: "" });
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    canAccessMigration(walletAddress).then((allowed) => {
+      if (!cancelled) setCanViewMigration(allowed);
+    });
+    return () => { cancelled = true; };
+  }, [walletAddress]);
 
   const handleRegister = async () => {
     if (isRegistering || registrationStatus !== "unregistered") return;
@@ -365,7 +376,7 @@ const Login = () => {
                 {isRegistering ? "Registering..." : "Register"}
               </button>
               )}
-              {registrationStatus === "unregistered" && (
+              {registrationStatus === "unregistered" && canViewMigration && (
                 <button className="disconnect-btn" onClick={() => navigate("/migration-data")}>
                   View Migration Data
                 </button>

@@ -24,7 +24,8 @@ const claimActions = [
   { method: "claimRewardIncome", incomeType: 4, label: "Reward Income" }
 ];
 const RANK_CHECKPOINT_READ_ABI = [
-  "function getPowerSchedule(address) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)"
+  "function previewPowerClaimable(address user) view returns(uint256 level,uint256 amount)",
+  "function previewRewardClaimable(address user,uint256 index) view returns(uint256 amount)"
 ];
 
 const formatAmount = (amount) => {
@@ -103,11 +104,27 @@ export default function V2ClaimIncome() {
             currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
 
             // The legacy checkpoint keeps a verified V1 remainder until the
-            // user claims Power. It is intentionally not stored in Manager's
-            // pending mapping before that claim, so include it in the UI view.
+            // user claims Power. Preview is calculated in the checkpoint from
+            // the current block, including any due 10-day installment.
             if (action.incomeType === 3) {
-              const schedule = await checkpoint.getPowerSchedule(wallet);
-              if (schedule.set) currentAmount += schedule.unpaidAmount;
+              try {
+                const [, legacyReady] = await checkpoint.previewPowerClaimable(wallet);
+                currentAmount += legacyReady;
+              } catch {
+                // A prior deployment may not yet contain the optional
+                // checkpoint preview method. Keep normal V2 income visible.
+              }
+            }
+            if (action.incomeType === 4) {
+              try {
+                const legacyRewards = await Promise.all(
+                  Array.from({ length: 12 }, (_, offset) => checkpoint.previewRewardClaimable(wallet, offset + 1))
+                );
+                currentAmount += legacyRewards.reduce((total, amount) => total + BigInt(amount), 0n);
+              } catch {
+                // Keep normal V2 Reward preview available until the updated
+                // legacy checkpoint is deployed.
+              }
             }
 
             // Show the raw accrued amount for every income type. The shared

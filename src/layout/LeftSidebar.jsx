@@ -5,6 +5,7 @@ import ReferralNetworkABI from "../blockchain/referralNetworkABI.json";
 import { ReferralNetworkAddress } from "../blockchain/address";
 import { BSC_MAINNET } from "../blockchain/bscMainnetConfig";
 import { getReadWalletAddress } from "../blockchain/readProvider";
+import { canAccessMigration } from "../blockchain/migrationAccess";
 import user from "/dashboardimg/user.png";
 
 const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
@@ -14,6 +15,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const [walletAddress, setWalletAddress] = useState("");
   const [userId, setUserId] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [canViewMigration, setCanViewMigration] = useState(false);
 
   const formatWalletAddress = (address) => {
     if (!address) {
@@ -39,6 +41,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
       if (!address || !ethers.isAddress(address)) {
         setUserId("");
+        setCanViewMigration(false);
         return;
       }
 
@@ -56,6 +59,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       } catch {
         setUserId("");
       }
+      setCanViewMigration(await canAccessMigration(address));
     };
 
     const handleAccountsChanged = async (accounts) => {
@@ -64,6 +68,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
       if (!address || !ethers.isAddress(address)) {
         setUserId("");
+        setCanViewMigration(false);
         return;
       }
 
@@ -81,6 +86,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       } catch {
         setUserId("");
       }
+      setCanViewMigration(await canAccessMigration(address));
     };
 
     loadWallet();
@@ -120,6 +126,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
     setIsLoggingOut(true);
     setWalletAddress("");
     setUserId("");
+    setCanViewMigration(false);
     SetSidebarOpen(false);
     navigate("/login", { replace: true });
 
@@ -345,15 +352,17 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
             )}
           </div>
 
-          <NavLink
-            to="/migration-data"
-            className="nav"
-            onClick={handleNavItemClick}
-          >
-            <p className="nav-item">
-              <i className="bi bi-arrow-left-right"></i> Migration Data
-            </p>
-          </NavLink>
+          {canViewMigration && (
+            <NavLink
+              to="/migration-data"
+              className="nav"
+              onClick={handleNavItemClick}
+            >
+              <p className="nav-item">
+                <i className="bi bi-arrow-left-right"></i> Migration Data
+              </p>
+            </NavLink>
+          )}
 
           {/* <div className="nav-dropdown">
             <div
