@@ -15,10 +15,33 @@ import {
   ReferralNetworkAddress,
   TokenAddress,
   V2LedgerAddress,
+  V2VerifiedLegacyImporterAddress,
 } from "../../blockchain/address";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscMainnetConfig";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
+
+const LEGACY_IMPORT_EVENT = new ethers.Interface([
+  "event LegacyPackageSnapshotImported(address indexed user,uint256 indexed sourceIndex,uint256 amount,uint256 usedIncome)",
+]);
+
+// A migrated V1 package is already represented by its V2 package. Read the
+// importer event so it contributes to investment (and the 3x limit) once.
+const readImportedV1Indexes = async (provider, user) => {
+  if (!ethers.isAddress(V2VerifiedLegacyImporterAddress)) return null;
+  try {
+    const event = LEGACY_IMPORT_EVENT.getEvent("LegacyPackageSnapshotImported");
+    const logs = await provider.getLogs({
+      address: V2VerifiedLegacyImporterAddress,
+      topics: [event.topicHash, ethers.zeroPadValue(user, 32)],
+      fromBlock: 0,
+      toBlock: "latest",
+    });
+    return new Set(logs.map((log) => Number(LEGACY_IMPORT_EVENT.parseLog(log).args.sourceIndex)));
+  } catch {
+    return null;
+  }
+};
 
 const DashboardTop = () => {
   const { SetSidebarOpen } = useOutletContext();
@@ -181,6 +204,110 @@ const DashboardTop = () => {
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
       const v2Lens = new ethers.Contract(await v2Manager.incomeReadyLens(), V2PackageManagerABI, v2Provider);
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
+
+      // Plan progress follows the migration view, not a single active package:
+      //   V1 gross withdrawn (net + fee) + V1 wallet balance
+      // + V2 withdrawn + all currently claimable V2 income.
+      // Its cap is three times the visible V1+V2 investment, with imported
+      // V1 source indexes excluded because their V2 rows already contain them.
+      const v1Provider = new ethers.JsonRpcProvider(
+        V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true },
+      );
+      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
+      const [
+        v1StakeLengthRaw,
+        v1NetWithdrawn,
+        v1Withdrawable,
+        v1FeeBP,
+        v2Invested,
+        v2PackageHistoryLengthRaw,
+        v2WithdrawLengthRaw,
+        v2DirectReady,
+        v2SelfRoiReady,
+        v2LevelRoiReady,
+        v2PowerReady,
+        v2RewardReady,
+      ] = await Promise.all([
+        v1Manager.getStakeHistoryLength(wallet),
+        v1Manager.totalIncomeWithdrawnToken(wallet),
+        v1Manager.incomeWalletToken(wallet),
+        v1Manager.withdrawFeeBP(),
+        v2Manager.totalUsdtSpent(wallet),
+        v2Manager.getPackageHistoryLength(wallet),
+        v2Ledger.getUserWithdrawHistoryLength(wallet),
+        v2Lens.getIncomeReady(wallet, 0),
+        v2Lens.getIncomeReady(wallet, 1),
+        v2Lens.getIncomeReady(wallet, 2),
+        v2Lens.getIncomeReady(wallet, 3),
+        v2Lens.getIncomeReady(wallet, 4),
+      ]);
+      const v1Packages = await Promise.all(Array.from(
+        { length: Number(v1StakeLengthRaw ?? 0n) },
+        async (_, index) => {
+          const stake = await v1Manager.userStakeHistory(wallet, index);
+          return { index, amount: BigInt(stake?.packageValue ?? stake?.[0] ?? 0n) };
+        },
+      ));
+      const [importedV1Indexes, v2Withdrawals, v2Packages] = await Promise.all([
+        readImportedV1Indexes(v2Provider, wallet),
+        Promise.all(Array.from(
+          { length: Number(v2WithdrawLengthRaw ?? 0n) },
+          (_, index) => v2Ledger.getUserWithdrawHistoryAt(wallet, index),
+        )),
+        Promise.all(Array.from(
+          { length: Number(v2PackageHistoryLengthRaw ?? 0n) },
+          async (_, index) => {
+            const record = await v2Manager.getPackageHistoryAt(wallet, index);
+            return BigInt(record.amount ?? record[0] ?? 0n);
+          },
+        )),
+      ]);
+      const visibleV1Investment = v1Packages.reduce(
+        (total, item) => importedV1Indexes?.has(item.index) ? total : total + item.amount,
+        0n,
+      );
+      const totalInvestment = visibleV1Investment + BigInt(v2Invested ?? 0n);
+      // The limit is package-tier based, never a blanket investment × 3:
+      // 25→3x, 100→5x, 500→7x and 1000→10x. Imported V1 package indexes
+      // were removed above, while their V2 package rows are included here.
+      const combinedIncomeLimit = v1Packages.reduce(
+        (total, item) => importedV1Indexes?.has(item.index)
+          ? total
+          : total + incomeLimitForPackage(item.amount),
+        0n,
+      ) + v2Packages.reduce(
+        (total, amount) => total + incomeLimitForPackage(amount),
+        0n,
+      );
+      const feeBP = BigInt(v1FeeBP ?? 0n);
+      const v1Net = BigInt(v1NetWithdrawn ?? 0n);
+      // V1 stores the net amount actually paid. Reconstruct its fee so plan
+      // progress uses the full withdrawn amount as requested.
+      const v1Fee = feeBP < 10_000n ? (v1Net * feeBP) / (10_000n - feeBP) : 0n;
+      const v1Used = v1Net + v1Fee + BigInt(v1Withdrawable ?? 0n);
+      const v2Withdrawn = v2Withdrawals.reduce(
+        (total, record) => total + BigInt(record.amount ?? record[0] ?? 0n),
+        0n,
+      );
+      const v2Ready = BigInt(v2DirectReady ?? 0n)
+        + BigInt(v2SelfRoiReady ?? 0n)
+        + BigInt(v2LevelRoiReady ?? 0n)
+        + BigInt(v2PowerReady ?? 0n)
+        + BigInt(v2RewardReady ?? 0n);
+      const combinedUsed = v1Used + v2Withdrawn + v2Ready;
+      const limitExceeded = combinedIncomeLimit > 0n && combinedUsed > combinedIncomeLimit;
+      setPlanActivity({
+        progressText: combinedIncomeLimit === 0n || limitExceeded
+          ? "0% / 100%"
+          : `${toPercent2(combinedUsed, combinedIncomeLimit)}% / 100%`,
+        activeStakeLabel: totalInvestment > 0n
+          ? `Combined income limit: ${formatEther2(combinedIncomeLimit)} USDT`
+          : "No package investment found",
+        selfRoiReadyLabel: "",
+        remainingSeconds: 0,
+      });
+      return;
+
       const [currentPackage, totalIncomeLimit, packageHistoryLength, incomeHistoryLength, directReady, selfRoiReady, levelRoiReady, powerReady, rewardReady, roiDayRaw, roiStartRaw] = await Promise.all([
         v2Manager.currentPackage(wallet),
         v2Manager.totalIncomeLimit(wallet),
