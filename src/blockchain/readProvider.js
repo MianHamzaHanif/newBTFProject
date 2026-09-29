@@ -30,22 +30,25 @@ export const getReadWalletAddress = async () => {
   return ethers.isAddress(saved) ? saved : "";
 };
 
-// Read-only blockchain calls must not use the injected wallet RPC. A single
-// shared provider lets ethers batch calls from dashboard cards into one RPC
-// request instead of opening a new provider for every component refresh.
-// Use the official BNB Chain Mainnet endpoint first. The publicnode endpoint
-// can intermittently time out on batched ledger/history reads.
-const readRequest = new ethers.FetchRequest(BSC_MAINNET.rpcUrls[0]);
-readRequest.timeout = 20_000;
-
-const bscReadProvider = new ethers.JsonRpcProvider(
-  readRequest,
-  BSC_MAINNET.chainId,
-  {
+// Read-only blockchain calls must not use the injected wallet RPC. Some
+// mobile/Vercel browsers intermittently receive no HTTP response from the
+// official dataseed endpoint, which ethers reports as "missing response for
+// request". Use PublicNode first and fail over automatically to dataseed.
+const makeReadProvider = (url) => {
+  const request = new ethers.FetchRequest(url);
+  request.timeout = 20_000;
+  return new ethers.JsonRpcProvider(request, BSC_MAINNET.chainId, {
     staticNetwork: true,
-    batchMaxCount: 100,
+    // Individual calls are more reliable through mobile networks than a
+    // large JSON-RPC batch for dashboard histories.
+    batchMaxCount: 1,
     batchStallTime: 0,
-  },
-);
+  });
+};
+
+const bscReadProvider = new ethers.FallbackProvider([
+  { provider: makeReadProvider(BSC_MAINNET.rpcUrls[1]), priority: 1, stallTimeout: 1_200, weight: 1 },
+  { provider: makeReadProvider(BSC_MAINNET.rpcUrls[0]), priority: 2, stallTimeout: 2_000, weight: 1 },
+], 1);
 
 export const createBscReadProvider = () => bscReadProvider;
