@@ -3,7 +3,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import { ReferralNetworkAddress } from "../../../blockchain/address";
+import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
+import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
+import { PackageManagerAddress, ReferralNetworkAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
@@ -11,6 +13,11 @@ import "../styles/style.css";
 
 const V1_POWER_MANAGER_ABI = ["function powerIncomeModule() view returns(address)"];
 const V1_POWER_MODULE_ABI = ["function activePowerLevel(address) view returns(uint256)"];
+const V1_DIRECT_READER_ABI = [
+  "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
+  "function getLevelUsersLength(address upline,uint256 level) view returns(uint256)",
+  "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns(address)",
+];
 
 const formatUsdt = (value) => {
   try {
@@ -22,6 +29,40 @@ const formatUsdt = (value) => {
 };
 
 const shortAddress = (value) => `${value.slice(0, 6)}...${value.slice(-4)}`;
+
+const createV1ReadProvider = () => {
+  const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
+  request.timeout = 30_000;
+  return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
+};
+
+const combinedPackageBusiness = async (address, v1Manager, v2Manager) => {
+  const [v1LengthRaw, v2LengthRaw] = await Promise.all([
+    v1Manager.getStakeHistoryLength(address).catch(() => 0n),
+    v2Manager.getPackageHistoryLength(address).catch(() => 0n),
+  ]);
+  const [v1Stakes, v2Packages] = await Promise.all([
+    Promise.all(Array.from({ length: Number(v1LengthRaw) }, (_, index) => v1Manager.userStakeHistory(address, index))),
+    Promise.all(Array.from({ length: Number(v2LengthRaw) }, (_, index) => v2Manager.getPackageHistoryAt(address, index))),
+  ]);
+  const importedKeys = new Map();
+  const v1Total = v1Stakes.reduce((total, stake) => {
+    const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n);
+    const timestamp = BigInt(stake?.timestamp ?? stake?.[7] ?? 0n);
+    const key = `${amount}:${timestamp}`;
+    importedKeys.set(key, (importedKeys.get(key) || 0) + 1);
+    return total + amount;
+  }, 0n);
+  const v2NewTotal = v2Packages.reduce((total, record) => {
+    const amount = BigInt(record?.amount ?? record?.[0] ?? 0n);
+    const timestamp = BigInt(record?.purchasedAt ?? record?.[1] ?? 0n);
+    const key = `${amount}:${timestamp}`;
+    const imported = importedKeys.get(key) || 0;
+    if (imported) { importedKeys.set(key, imported - 1); return total; }
+    return total + amount;
+  }, 0n);
+  return v1Total + v2NewTotal;
+};
 
 async function ensureBscMainnet() {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
@@ -57,15 +98,18 @@ export const PowerIncomeWithdraw = () => {
         V2ReferralRegistryABI,
         createBscReadProvider(),
       );
-      const [achievedPowerRaw, achievedRewardRaw, directCount, syncState] = await Promise.all([
+      const [achievedPowerRaw, achievedRewardRaw, syncState] = await Promise.all([
         registry.getAchievedPowerLevel(user),
         registry.getAchievedRewardCount(user),
-        registry.getLevelUsersLength(user, 0),
         registry.getPowerRewardSync(user),
       ]);
       const achieved = Number(achievedPowerRaw);
-      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, createBscReadProvider());
-      const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, createBscReadProvider());
+      const v1Provider = createV1ReadProvider();
+      const v1PowerManager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, v1Provider);
+      const v1PowerModule = new ethers.Contract(await v1PowerManager.powerIncomeModule(), V1_POWER_MODULE_ABI, v1Provider);
+      const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, v1Provider);
+      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
+      const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
       const v1Achieved = Number(await v1PowerModule.activePowerLevel(user));
       const achievedReward = Number(achievedRewardRaw);
       const nextLevel = achieved < 9 ? achieved + 1 : 0;
@@ -87,49 +131,44 @@ export const PowerIncomeWithdraw = () => {
         ? requiredBusiness - qualifiedBusiness
         : 0n;
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
-      const directAddresses = await Promise.all(
-        Array.from({ length: Number(directCount) }, (_, index) =>
-          registry.getLevelUserAt(user, 0, index),
-        ),
-      );
-      const directBreakdowns = await Promise.all(
-        directAddresses.map(async (direct, index) => {
-          const [business, legacyBusiness, qualified, legacyCounted, everPackage] = await Promise.all([
-            registry.legBusiness(user, direct),
-            registry.legacyLegBusiness(user, direct),
-            registry.hasQualifiedPackage(direct),
-            registry.legacyDirectCounted(direct).catch(() => false),
-            registry.hasEverPackage(direct).catch(() => true),
-          ]);
-          const eligible = legacyCounted || everPackage;
-          const legacyAmount = BigInt(legacyBusiness);
-          const totalAmount = BigInt(business);
-          const newAmount = totalAmount > legacyAmount ? totalAmount - legacyAmount : 0n;
-          const totalCounted = nextLevel && eligible
-            ? (totalAmount > capPerLeg ? capPerLeg : totalAmount)
-            : 0n;
-          const legacyCountedAmount = legacyAmount > totalCounted ? totalCounted : legacyAmount;
-          return {
-            direct: shortAddress(direct),
-            legacyAmount,
-            newAmount,
-            legacyCountedAmount,
-            newCountedAmount: totalCounted - legacyCountedAmount,
-            status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package",
-          };
-        }),
-      );
-
-      // `legBusiness` includes imported V1 business. Show the V1 part first,
-      // then only a real V2 increment. A zero V2 increment is intentionally hidden.
-      const directRows = [
-        ...directBreakdowns
-          .filter((item) => item.legacyAmount > 0n)
-          .map((item) => ({ source: "V1 (Legacy)", direct: item.direct, business: formatUsdt(item.legacyAmount), counted: formatUsdt(item.legacyCountedAmount), status: item.status })),
-        ...directBreakdowns
-          .filter((item) => item.newAmount > 0n)
-          .map((item) => ({ source: "V2 (New)", direct: item.direct, business: formatUsdt(item.newAmount), counted: formatUsdt(item.newCountedAmount), status: item.status })),
-      ].map((item, index) => ({ ...item, sno: index + 1 }));
+      const [v1DirectResult, v2DirectResult] = await Promise.allSettled([
+        (async () => {
+          const count = Number(await v1Registry.getLevelUsersLength(user, 0));
+          return Promise.all(Array.from({ length: count }, (_, index) => v1Registry.getLevelUserAt(user, 0, index)));
+        })(),
+        (async () => {
+          const count = Number(await registry.getLevelUsersLength(user, 0));
+          return Promise.all(Array.from({ length: count }, (_, index) => registry.getLevelUserAt(user, 0, index)));
+        })(),
+      ]);
+      const directMap = new Map();
+      for (const direct of v1DirectResult.status === "fulfilled" ? v1DirectResult.value : []) {
+        directMap.set(direct.toLowerCase(), { address: direct, inV1: true, inV2: false });
+      }
+      for (const direct of v2DirectResult.status === "fulfilled" ? v2DirectResult.value : []) {
+        const previous = directMap.get(direct.toLowerCase());
+        directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
+      }
+      const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
+        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage] = await Promise.all([
+          member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
+          member.inV2 ? registry.users(member.address).catch(() => null) : null,
+          combinedPackageBusiness(member.address, v1Manager, v2Manager).catch(() => 0n),
+          member.inV2 ? registry.hasQualifiedPackage(member.address).catch(() => false) : false,
+          member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
+          member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
+        ]);
+        const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
+          + BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+        const legBusiness = BigInt(selfBusiness) + teamBusiness;
+        const eligible = legacyCounted || everPackage;
+        const counted = nextLevel && eligible ? (legBusiness > capPerLeg ? capPerLeg : legBusiness) : 0n;
+        return {
+          sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness),
+          teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted),
+          status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package",
+        };
+      }));
 
       setSummary({
         achieved,
@@ -145,7 +184,7 @@ export const PowerIncomeWithdraw = () => {
         rewardRequiredBusiness,
         remaining,
         capPerLeg,
-        directCount,
+        directCount: directMap.size,
         syncState,
       });
       setRows(directRows);
@@ -203,6 +242,8 @@ export const PowerIncomeWithdraw = () => {
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
+    { id: "selfBusiness", label: "Direct Business", sortable: true },
+    { id: "teamBusiness", label: "Team Business", sortable: true },
     { id: "business", label: "Leg Business", sortable: true },
     { id: "counted", label: "Counted for Next Power", sortable: true },
     { id: "status", label: "Status", sortable: true },
@@ -245,6 +286,8 @@ export const PowerIncomeWithdraw = () => {
         <>
           <TableCell align="center">{row.sno}</TableCell>
           <TableCell align="center">{row.direct}</TableCell>
+          <TableCell align="center">{row.selfBusiness} USDT</TableCell>
+          <TableCell align="center">{row.teamBusiness} USDT</TableCell>
           <TableCell align="center">{row.business} USDT</TableCell>
           <TableCell align="center">{row.counted} USDT</TableCell>
           <TableCell align="center">{row.status}</TableCell>

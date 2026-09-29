@@ -5,6 +5,7 @@ import { ethers } from "ethers";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
 import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
+import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import {
   PackageManagerAddress,
   ReferralNetworkAddress,
@@ -13,9 +14,18 @@ import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
 
+// Keep V1 reads to the exact functions needed here. The V1 and V2 registries
+// must be queried independently during migration.
+const V1_TEAM_READER_ABI = [
+  "function users(address user) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
+  "function getLevelUsersLength(address upline,uint256 level) view returns(uint256)",
+  "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns(address)",
+];
+
 const createV1ReadProvider = () => {
   const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
   // Public V1 RPCs are more reliable with small individual requests.
+  request.timeout = 30_000;
   return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {
     staticNetwork: true,
     batchMaxCount: 1,
@@ -245,66 +255,58 @@ export const MyTeam = () => {
         setLoadError("");
 
         const provider = createBscReadProvider();
-        const v2ReferralContract = new ethers.Contract(
-          ReferralNetworkAddress,
-          ReferralNetworkABI,
-          provider,
-        );
+        const v2ReferralContract = new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, provider);
         const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
         const v1Provider = createV1ReadProvider();
         const v1ReferralContract = new ethers.Contract(
           V1_MAINNET.referralNetwork,
-          ReferralNetworkABI,
+          V1_TEAM_READER_ABI,
           v1Provider,
         );
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
         const levelIndex = selectedLevel - 1;
-        const readLevel = async (registry) => {
+        const readLevelAddresses = async (registry) => {
           const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
-          const addresses = await readInBatches(
+          return readInBatches(
             Array.from({ length: count }, (_, index) => index),
             (index) => registry.getLevelUserAt(walletAddress, levelIndex),
           );
-          const users = await Promise.allSettled(addresses.map(async (address) => ({
-            address,
-            user: await registry.users(address),
-          })));
-          return users
-            .filter((result) => result.status === "fulfilled")
-            .map((result) => result.value);
         };
         const [v1Result, v2Result] = await Promise.allSettled([
-          readLevel(v1ReferralContract),
-          readLevel(v2ReferralContract),
+          readLevelAddresses(v1ReferralContract),
+          readLevelAddresses(v2ReferralContract),
         ]);
         const merged = new Map();
-        for (const item of v1Result.status === "fulfilled" ? v1Result.value : []) {
-          merged.set(item.address.toLowerCase(), { address: item.address, v1User: item.user, v2User: null });
+        for (const address of v1Result.status === "fulfilled" ? v1Result.value : []) {
+          merged.set(address.toLowerCase(), { address, inV1: true, inV2: false });
         }
-        for (const item of v2Result.status === "fulfilled" ? v2Result.value : []) {
-          const key = item.address.toLowerCase();
+        for (const address of v2Result.status === "fulfilled" ? v2Result.value : []) {
+          const key = address.toLowerCase();
           const existing = merged.get(key);
-          merged.set(key, { address: item.address, v1User: existing?.v1User ?? null, v2User: item.user });
+          merged.set(key, { address, inV1: existing?.inV1 ?? false, inV2: true });
         }
-        const rowResults = await Promise.allSettled(Array.from(merged.values()).map(async (member, index) => {
-          const userData = member.v2User ?? member.v1User;
-          const packageTotal = await getCombinedPackageTotal(member.address, v1Manager, v2Manager);
-          const source = member.v1User && member.v2User ? "V1 + V2" : member.v2User ? "V2" : "V1";
+        const nextRows = await Promise.all(Array.from(merged.values()).map(async (member, index) => {
+          // A profile/history failure for one contract must never remove a
+          // member found in the other contract's level list.
+          const [v1User, v2User, packageTotal] = await Promise.all([
+            member.inV1 ? v1ReferralContract.users(member.address).catch(() => null) : null,
+            member.inV2 ? v2ReferralContract.users(member.address).catch(() => null) : null,
+            getCombinedPackageTotal(member.address, v1Manager, v2Manager).catch(() => 0n),
+          ]);
+          const userData = v2User ?? v1User;
+          const v1Team = BigInt(v1User?.totalTeam ?? v1User?.[3] ?? 0n);
+          const v2Team = BigInt(v2User?.totalTeam ?? v2User?.[3] ?? 0n);
+          const v1Deposit = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n);
+          const v2Deposit = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
           return {
             sno: index + 1,
             address: member.address,
             registeredAt: formatTimestamp(userData?.registeredAt ?? userData?.[2]),
-            source,
-            packageToken: formatEther4(userData?.selfStakeToken ?? userData?.[7] ?? 0n),
             packageUsdt: formatEther4(packageTotal),
-            totalTeam: (userData?.totalTeam ?? userData?.[3] ?? 0n).toString(),
-            totalTeamDeposit: formatEther4(userData?.totalTeamDeposit ?? userData?.[4] ?? 0n),
+            totalTeam: (v1Team + v2Team).toString(),
+            totalTeamDeposit: formatEther4(v1Deposit + v2Deposit),
           };
         }));
-        const nextRows = rowResults
-          .filter((result) => result.status === "fulfilled")
-          .map((result) => result.value)
-          .map((row, index) => ({ ...row, sno: index + 1 }));
 
         setRows(nextRows);
         if (nextRows.length === 0 && merged.size > 0) {

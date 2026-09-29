@@ -143,7 +143,7 @@ export default function V2ClaimHistory({ eventName = "", heading = "Income Histo
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "incomeType", label: "Income Type", sortable: true },
-    ...(["DirectIncomeClaimed", "SelfRoiClaimed"].includes(eventName) ? [] : [
+    ...(["DirectIncomeClaimed", "SelfRoiClaimed", "LevelRoiClaimed"].includes(eventName) ? [] : [
       { id: "level", label: "Level", sortable: true },
     ]),
     { id: "amount", label: "Claimed USDT", sortable: true },
@@ -176,7 +176,7 @@ export default function V2ClaimHistory({ eventName = "", heading = "Income Histo
               <>
                 <TableCell align="center">{row.sno}</TableCell>
                 <TableCell align="center">{row.incomeType}</TableCell>
-                {!['DirectIncomeClaimed', 'SelfRoiClaimed'].includes(eventName) && <TableCell align="center">{row.level}</TableCell>}
+                {!['DirectIncomeClaimed', 'SelfRoiClaimed', 'LevelRoiClaimed'].includes(eventName) && <TableCell align="center">{row.level}</TableCell>}
                 <TableCell align="center">{row.amount}</TableCell>
                 <TableCell align="center" className="team-time-cell">{row.timestamp}</TableCell>
               </>

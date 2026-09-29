@@ -14,11 +14,34 @@ import {
   ReferralNetworkAddress,
   TokenAddress,
   V2LedgerAddress,
+  V2VerifiedLegacyImporterAddress,
 } from "../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 
 const TOKEN_LABEL = "USDT";
+const LEGACY_IMPORT_EVENT = new ethers.Interface([
+  "event LegacyPackageSnapshotImported(address indexed user,uint256 indexed sourceIndex,uint256 amount,uint256 usedIncome)",
+]);
+
+// Returns the exact V1 package indexes imported to V2. The event is emitted
+// by the verified importer and avoids counting a migrated package twice in
+// V1 + V2 dashboard investment totals.
+const readImportedV1Indexes = async (provider, user) => {
+  if (!ethers.isAddress(V2VerifiedLegacyImporterAddress)) return null;
+  try {
+    const event = LEGACY_IMPORT_EVENT.getEvent("LegacyPackageSnapshotImported");
+    const logs = await provider.getLogs({
+      address: V2VerifiedLegacyImporterAddress,
+      topics: [event.topicHash, ethers.zeroPadValue(user, 32)],
+      fromBlock: 0,
+      toBlock: "latest",
+    });
+    return new Set(logs.map((log) => Number(LEGACY_IMPORT_EVENT.parseLog(log).args.sourceIndex)));
+  } catch {
+    return null;
+  }
+};
 
 const DashboardBottom = () => {
   const [stats, setStats] = useState({
@@ -155,6 +178,17 @@ const DashboardBottom = () => {
           )),
           v1Registry.users(walletAddress),
         ]).catch(() => [0n, 0n, 0n, 0n, 0n, 0n, 0n, Array(15).fill(false), null]);
+        const v1PackageRecordsPromise = (async () => {
+          const length = Number(await v1Manager.getStakeHistoryLength(walletAddress));
+          return Promise.all(Array.from({ length }, async (_, index) => {
+            const stake = await v1Manager.userStakeHistory(walletAddress, index);
+            return {
+              index,
+              amount: BigInt(stake?.packageValue ?? stake?.[0] ?? 0n),
+              timestamp: BigInt(stake?.timestamp ?? stake?.[7] ?? 0n),
+            };
+          }));
+        })().catch(() => null);
 
         const v2Provider = createBscReadProvider();
         const v2Token = new ethers.Contract(TokenAddress, [
@@ -164,10 +198,11 @@ const DashboardBottom = () => {
         const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
         const v2Registry = new ethers.Contract(ReferralNetworkAddress, V2ReferralRegistryABI, v2Provider);
         const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
-        const [totalInvested, incomeLengthRaw, withdrawLengthRaw, v2TokenDecimals, v2TokenBalanceRaw, v2UserData] = await Promise.all([
+        const [totalInvested, incomeLengthRaw, withdrawLengthRaw, packageHistoryLengthRaw, v2TokenDecimals, v2TokenBalanceRaw, v2UserData] = await Promise.all([
           v2Manager.totalUsdtSpent(walletAddress),
           v2Ledger.getUserIncomeHistoryLength(walletAddress),
           v2Ledger.getUserWithdrawHistoryLength(walletAddress),
+          v2Manager.getPackageHistoryLength(walletAddress),
           v2Token.decimals(),
           v2Token.balanceOf(walletAddress),
           v2Registry.users(walletAddress),
@@ -183,11 +218,23 @@ const DashboardBottom = () => {
         const levelOpenPromise = Promise.all(
           Array.from({ length: 15 }, (_, index) => v2Registry.isLevelOpen(walletAddress, index).catch(() => false))
         );
-        const [incomeRecords, withdrawRecords, levelOpen, v1Summary] = await Promise.all([
+        const v2PackageRecordsPromise = Promise.all(
+          Array.from({ length: Number(packageHistoryLengthRaw) }, async (_, index) => {
+            const record = await v2Manager.getPackageHistoryAt(walletAddress, index);
+            return {
+              amount: BigInt(record.amount ?? record[0] ?? 0n),
+              timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),
+            };
+          }),
+        );
+        const [incomeRecords, withdrawRecords, levelOpen, v1Summary, v1PackageRecords, v2PackageRecords, importedV1Indexes] = await Promise.all([
           incomeRecordsPromise,
           withdrawRecordsPromise,
           levelOpenPromise,
           v1SummaryPromise,
+          v1PackageRecordsPromise,
+          v2PackageRecordsPromise,
+          readImportedV1Indexes(v2Provider, walletAddress),
         ]);
         const [
           v1DirectIncome,
@@ -217,6 +264,35 @@ const DashboardBottom = () => {
           + BigInt(v1LevelRoiIncome)
           + BigInt(v1PowerIncome)
           + BigInt(v1RewardIncome);
+        // V2 totalUsdtSpent already includes a package imported from V1. Add
+        // only V1 packages that have no V2 import event, so Total Invested
+        // follows the same no-duplicate rule as Activation Package.
+        let visibleV1Investment = BigInt(v1Invested);
+        if (Array.isArray(v1PackageRecords)) {
+          if (importedV1Indexes) {
+            visibleV1Investment = v1PackageRecords.reduce(
+              (total, record) => importedV1Indexes.has(record.index) ? total : total + record.amount,
+              0n,
+            );
+          } else {
+            // Event reads can be unavailable on a restrictive RPC. Preserve
+            // the same conservative amount/time fallback used by Activation.
+            const v2Matches = new Map();
+            for (const record of v2PackageRecords) {
+              const key = `${record.amount}|${record.timestamp}`;
+              v2Matches.set(key, (v2Matches.get(key) || 0) + 1);
+            }
+            visibleV1Investment = v1PackageRecords.reduce((total, record) => {
+              const key = `${record.amount}|${record.timestamp}`;
+              const count = v2Matches.get(key) || 0;
+              if (count) {
+                v2Matches.set(key, count - 1);
+                return total;
+              }
+              return total + record.amount;
+            }, 0n);
+          }
+        }
         // Each card represents the same income class across both deployed
         // contracts. V1's Self + Level ROI map to the V2 ROI card.
         const combinedByType = {
@@ -236,7 +312,7 @@ const DashboardBottom = () => {
           || Number(v1UserData?.id ?? v1UserData?.[0] ?? 0) > 0;
         setStats({
           totalEarned: formatUsd(totalEarned + v1Earned),
-          totalInvested: formatUsd(BigInt(totalInvested) + BigInt(v1Invested)),
+          totalInvested: formatUsd(BigInt(totalInvested) + visibleV1Investment),
           totalWithdrawn: formatUsd(v2Withdrawn + BigInt(v1Withdrawn)),
         });
         setTokenInfo({ symbol: TOKEN_LABEL, balance: formatToken(v2TokenBalanceRaw, Number(v2TokenDecimals) || 18) });
