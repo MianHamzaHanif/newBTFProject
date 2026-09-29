@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { ethers } from "ethers";
-import { BSC_TESTNET } from "../../blockchain/bscTestnetConfig";
+import { BSC_MAINNET } from "../../blockchain/bscMainnetConfig";
 import { readRegistration } from "../../blockchain/registrationReader";
 
 // Dashboard routes are protected by the V2 Registry itself. A connected wallet
-// is not enough: `users(wallet).exists` must be true on BSC Testnet.
+// is not enough: `users(wallet).exists` must be true on BSC Mainnet.
 export default function RequireV2Registration() {
   const [status, setStatus] = useState("checking");
 
@@ -23,7 +23,7 @@ export default function RequireV2Registration() {
         const wallet = accounts?.[0] || "";
 
         if (
-          BigInt(chainId) !== BigInt(BSC_TESTNET.chainIdHex) ||
+          BigInt(chainId) !== BigInt(BSC_MAINNET.chainIdHex) ||
           !ethers.isAddress(wallet)
         ) {
           if (!cancelled) setStatus("denied");

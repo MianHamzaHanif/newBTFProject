@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2FlushLedgerABI from "../../../blockchain/v2FlushLedgerABI";
 import { V2FlushLedgerAddress } from "../../../blockchain/address";
-import { BSC_TESTNET } from "../../../blockchain/bscTestnetConfig";
+import { BSC_MAINNET } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
@@ -18,9 +18,9 @@ const formatTime = (value) => {
 };
 
 const createBackupReadProvider = () => {
-  const request = new ethers.FetchRequest(BSC_TESTNET.rpcUrls[1]);
+  const request = new ethers.FetchRequest(BSC_MAINNET.rpcUrls[1]);
   request.timeout = 20_000;
-  return new ethers.JsonRpcProvider(request, BSC_TESTNET.chainId, { staticNetwork: true });
+  return new ethers.JsonRpcProvider(request, BSC_MAINNET.chainId, { staticNetwork: true });
 };
 
 export const FlushIncome = () => {
@@ -36,7 +36,7 @@ export const FlushIncome = () => {
       const user = await getReadWalletAddress();
       if (!user || !ethers.isAddress(user)) throw new Error("Please connect your wallet.");
 
-      // Public Testnet RPCs can intermittently time out. Read the complete
+      // Public Mainnet RPCs can intermittently time out. Read the complete
       // snapshot from the primary provider, then retry once on backup RPC.
       const readSnapshot = async (provider) => {
         const flushLedger = new ethers.Contract(V2FlushLedgerAddress, V2FlushLedgerABI, provider);

@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
-import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscTestnetConfig";
+import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
@@ -19,7 +19,7 @@ const formatUsdt = (value) => {
 
 const shortAddress = (value) => `${value.slice(0, 6)}...${value.slice(-4)}`;
 
-async function ensureBscTestnet() {
+async function ensureBscMainnet() {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
   if (BigInt(chainId) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
   try {
@@ -112,7 +112,7 @@ export const Income5 = () => {
       setSyncing(true);
       setMessage("Confirm the Power/Reward update transaction in your wallet.");
       await window.ethereum.request({ method: "eth_requestAccounts" });
-      await ensureBscTestnet();
+      await ensureBscMainnet();
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const user = await signer.getAddress();

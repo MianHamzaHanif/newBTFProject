@@ -12,7 +12,7 @@ import {
   V2LedgerAddress,
   V2LegacyRankCheckpointAddress
 } from "../../../blockchain/address";
-import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscTestnetConfig";
+import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
@@ -39,7 +39,7 @@ const formatAmount = (amount) => {
   }
 };
 
-async function ensureBscTestnet() {
+async function ensureBscMainnet() {
   const currentChain = await window.ethereum.request({ method: "eth_chainId" });
   if (BigInt(currentChain) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
 
@@ -186,7 +186,7 @@ export default function V2ClaimIncome() {
       setPendingMethod(method);
       setMessage("Please confirm the claim transaction in your wallet.");
       await window.ethereum.request({ method: "eth_requestAccounts" });
-      await ensureBscTestnet();
+      await ensureBscMainnet();
 
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
@@ -212,7 +212,7 @@ export default function V2ClaimIncome() {
     try {
       setPendingMethod("faucet");
       await window.ethereum.request({ method: "eth_requestAccounts" });
-      await ensureBscTestnet();
+      await ensureBscMainnet();
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
       const tx = await new ethers.Contract(TokenAddress, TestUsdtABI, signer).faucet();
 

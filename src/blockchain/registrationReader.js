@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { BSC_TESTNET } from "./bscTestnetConfig.js";
+import { BSC_MAINNET } from "./bscMainnetConfig.js";
 import { ReferralNetworkAddress } from "./address.js";
 
 const registrationABI = [
@@ -7,13 +7,13 @@ const registrationABI = [
   "function rootAddress() view returns (address)",
 ];
 
-// Wallet providers are used for signing; these reads always target BSC Testnet.
+// Wallet providers are used for signing; these reads always target BSC Mainnet.
 export async function readRegistration(method, ...args) {
   let lastError;
-  for (const url of BSC_TESTNET.rpcUrls) {
+  for (const url of BSC_MAINNET.rpcUrls) {
     const request = new ethers.FetchRequest(url);
     request.timeout = 8000;
-    const provider = new ethers.JsonRpcProvider(request, BSC_TESTNET.chainId, {
+    const provider = new ethers.JsonRpcProvider(request, BSC_MAINNET.chainId, {
       staticNetwork: true,
       batchMaxCount: 1,
     });

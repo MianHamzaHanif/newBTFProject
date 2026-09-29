@@ -15,7 +15,7 @@ import {
   TokenAddress,
   V2LedgerAddress,
 } from "../../blockchain/address";
-import { BSC_TESTNET } from "../../blockchain/bscTestnetConfig";
+import { BSC_MAINNET } from "../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 
 const TOKEN_LABEL = "USDT";

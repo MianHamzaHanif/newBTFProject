@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
 import { clearRememberedWalletAddress, rememberWalletAddress } from "../../../blockchain/readProvider";
-import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscTestnetConfig";
+import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
 import { readRegistration } from "../../../blockchain/registrationReader";
@@ -37,7 +37,7 @@ const Login = () => {
     setRegisterMessage({ text, type });
   };
 
-  const ensureBscTestnet = async () => {
+  const ensureBscMainnet = async () => {
     const currentChain = await window.ethereum.request({ method: "eth_chainId" });
     if (BigInt(currentChain) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
     try {
@@ -57,7 +57,7 @@ const Login = () => {
     }
     const selectedChain = await window.ethereum.request({ method: "eth_chainId" });
     if (BigInt(selectedChain) !== BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) {
-      throw new Error("Please select BSC Testnet in your wallet and try again.");
+      throw new Error("Please select BSC Mainnet in your wallet and try again.");
     }
   };
 
@@ -83,7 +83,7 @@ const Login = () => {
       if (BigInt(chainId) !== BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) {
         setRegistrationStatus("error");
         setRegisterMessage({
-          text: "Switch to BSC Testnet or click your wallet address to continue.",
+          text: "Switch to BSC Mainnet or click your wallet address to continue.",
           type: "error",
         });
         return;
@@ -115,7 +115,7 @@ const Login = () => {
       await window.ethereum.request({
         method: "eth_requestAccounts",
       });
-      await ensureBscTestnet();
+      await ensureBscMainnet();
       const accounts = await window.ethereum.request({ method: "eth_accounts" });
       const connectedAddress = accounts?.[0] || "";
       setWalletAddress(connectedAddress);
@@ -167,7 +167,7 @@ const Login = () => {
 
     try {
       setIsRegistering(true);
-      await ensureBscTestnet();
+      await ensureBscMainnet();
 
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();

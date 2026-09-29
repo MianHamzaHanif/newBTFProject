@@ -16,7 +16,7 @@ import {
   TokenAddress,
   V2LedgerAddress,
 } from "../../blockchain/address";
-import { BSC_TESTNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscTestnetConfig";
+import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 
 const DashboardTop = () => {
@@ -214,7 +214,7 @@ const DashboardTop = () => {
       }
 
       const provider = new ethers.JsonRpcProvider(
-        BSC_TESTNET.rpcUrls[1], BSC_TESTNET.chainId, { staticNetwork: true },
+        BSC_MAINNET.rpcUrls[1], BSC_MAINNET.chainId, { staticNetwork: true },
       );
       const packageManager = new ethers.Contract(
         PackageManagerAddress,
@@ -313,7 +313,7 @@ const DashboardTop = () => {
       setDayCycle({ oneDaySeconds: v2OneDaySeconds, remainingSeconds: v2Progress === 0 ? v2OneDaySeconds : v2OneDaySeconds - v2Progress });
       return;
 
-      const provider = new ethers.JsonRpcProvider(BSC_TESTNET.rpcUrls[0]);
+      const provider = new ethers.JsonRpcProvider(BSC_MAINNET.rpcUrls[0]);
       const packageManager = new ethers.Contract(
         PackageManagerAddress,
         PackageManagerABI,
@@ -469,7 +469,7 @@ const DashboardTop = () => {
       }
 
       const provider = new ethers.JsonRpcProvider(
-        BSC_TESTNET.rpcUrls[1], BSC_TESTNET.chainId, { staticNetwork: true },
+        BSC_MAINNET.rpcUrls[1], BSC_MAINNET.chainId, { staticNetwork: true },
       );
       const packageManager = new ethers.Contract(
         PackageManagerAddress,
@@ -589,7 +589,7 @@ const DashboardTop = () => {
     };
   }, [loadDayCycle, loadPackageWarnings, loadPlanActivity]);
 
-  const ensureBscTestnet = async () => {
+  const ensureBscMainnet = async () => {
     try {
       await window.ethereum.request({
         method: "wallet_switchEthereumChain",
@@ -623,7 +623,7 @@ const DashboardTop = () => {
       if (!accounts?.[0]) {
         accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
       }
-      await ensureBscTestnet();
+      await ensureBscMainnet();
       const userAddress = accounts?.[0] || "";
       if (!ethers.isAddress(userAddress)) throw new Error("Wallet account not available");
 
@@ -737,7 +737,7 @@ const DashboardTop = () => {
       const rawMessage = error?.shortMessage || error?.reason || error?.message || "";
       setBuyStatus(
         rawMessage.toLowerCase().includes("could not coalesce error")
-          ? "Wallet/RPC rejected the request. Please reconnect the wallet on BSC Testnet and try again."
+          ? "Wallet/RPC rejected the request. Please reconnect the wallet on BSC Mainnet and try again."
           : rawMessage || "Buy failed.",
       );
     } finally {

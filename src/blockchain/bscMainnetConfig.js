@@ -1,17 +1,17 @@
-// Compatibility export for older dashboard files.  The V2 application is
-// testnet-only, so every consumer of this config uses BSC Testnet (chain 97).
+// BNB Smart Chain Mainnet network configuration used by all V2 reads and
+// wallet transactions.
 export const BSC_MAINNET = {
-  chainId: 97,
-  chainIdHex: "0x61",
-  chainName: "BNB Smart Chain Testnet",
+  chainId: 56,
+  chainIdHex: "0x38",
+  chainName: "BNB Smart Chain",
   rpcUrls: [
-    "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
-    "https://bsc-testnet-rpc.publicnode.com",
+    "https://bsc-dataseed.bnbchain.org",
+    "https://bsc-rpc.publicnode.com",
   ],
-  blockExplorerUrls: ["https://testnet.bscscan.com"],
+  blockExplorerUrls: ["https://bscscan.com"],
   nativeCurrency: {
-    name: "tBNB",
-    symbol: "tBNB",
+    name: "BNB",
+    symbol: "BNB",
     decimals: 18,
   },
 };

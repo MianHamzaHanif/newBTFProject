@@ -3,7 +3,7 @@ import { ethers } from "ethers";
 import { TableCell } from "@mui/material";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
 import { V2LedgerAddress } from "../../../blockchain/address";
-import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscTestnetConfig";
+import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import CustomTable from "../CommonComponents/CustomTable";
 
@@ -21,7 +21,7 @@ const formatTime = (value) => {
   return timestamp ? new Date(timestamp * 1000).toLocaleString() : "-";
 };
 
-const ensureBscTestnet = async () => {
+const ensureBscMainnet = async () => {
   const currentChain = await window.ethereum.request({ method: "eth_chainId" });
   if (BigInt(currentChain) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
 
@@ -111,7 +111,7 @@ export default function V2Withdrawal() {
       setWithdrawing(true);
       setMessage("Confirm V2 withdrawal in your wallet.");
       await window.ethereum.request({ method: "eth_requestAccounts" });
-      await ensureBscTestnet();
+      await ensureBscMainnet();
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
       const tx = await new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, signer).withdrawAll();
       await tx.wait();

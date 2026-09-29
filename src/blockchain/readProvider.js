@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { BSC_TESTNET } from "./bscTestnetConfig";
+import { BSC_MAINNET } from "./bscMainnetConfig";
 
 const WALLET_SESSION_KEY = "btf_connected_wallet";
 
@@ -33,14 +33,14 @@ export const getReadWalletAddress = async () => {
 // Read-only blockchain calls must not use the injected wallet RPC. A single
 // shared provider lets ethers batch calls from dashboard cards into one RPC
 // request instead of opening a new provider for every component refresh.
-// Use the official BNB Chain Testnet endpoint first. The publicnode endpoint
+// Use the official BNB Chain Mainnet endpoint first. The publicnode endpoint
 // can intermittently time out on batched ledger/history reads.
-const readRequest = new ethers.FetchRequest(BSC_TESTNET.rpcUrls[0]);
+const readRequest = new ethers.FetchRequest(BSC_MAINNET.rpcUrls[0]);
 readRequest.timeout = 20_000;
 
 const bscReadProvider = new ethers.JsonRpcProvider(
   readRequest,
-  BSC_TESTNET.chainId,
+  BSC_MAINNET.chainId,
   {
     staticNetwork: true,
     batchMaxCount: 100,
