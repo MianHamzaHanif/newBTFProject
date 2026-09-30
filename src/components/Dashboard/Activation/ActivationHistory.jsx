@@ -88,23 +88,14 @@ export const ActivationHistory = () => {
             ]);
             const length = Number(lengthRaw);
             return readInBatches(length, async (index) => {
-              const [record, income] = await Promise.all([
-                v2Manager.getPackageHistoryAt(walletAddress, index),
-                // The fallback keeps the old history table usable until the
-                // DAO executes the read-facet selector update.
-                v2Manager.getPackageIncomeStatus(walletAddress, index).catch(() => null),
-              ]);
+              const record = await v2Manager.getPackageHistoryAt(walletAddress, index);
               const generated = record.roiGenerated ?? record[3];
               const maximum = record.roiMaximum ?? record[4];
               const active = record.active ?? record[5];
               return {
                 source: "V2", sourceIndex: index, timestamp: record.purchasedAt ?? record[1],
                 package: `${formatUsdt(record.amount ?? record[0])} USDT`, income: `${formatUsdt(generated)} / ${formatUsdt(maximum)} USDT`,
-                usedIncome: income
-                  ? income.usedIncome ?? income[1]
-                  : length === 1
-                    ? (active ? aggregateUsed : null)
-                    : null,
+                usedIncome: length === 1 && active ? aggregateUsed : null,
                 status: active ? (generated < maximum ? "Active" : "Self ROI Complete") : "Inactive",
               };
             });

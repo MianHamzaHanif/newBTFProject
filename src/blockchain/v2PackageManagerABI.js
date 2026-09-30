@@ -26,7 +26,6 @@ export default [
   "function getIncomeReady(address user,uint8 incomeType) view returns (uint256 readyAmount)",
   "function getPackageHistoryLength(address user) view returns (uint256)",
   "function getPackageHistoryAt(address user,uint256 index) view returns (uint256 amount,uint256 purchasedAt,uint256 deactivatedAt,uint256 roiGenerated,uint256 roiMaximum,bool active)",
-  "function getPackageIncomeStatus(address user,uint256 index) view returns (uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool active)",
   "function ROI_DAY() view returns (uint256)",
   "function roiStartTime() view returns (uint256)",
   "function getPowerDetails(address user) view returns ((uint256 activeLevel,uint256 achievedLevel,uint256 activatedAt,uint256 releasedCount,uint256 claimedCount,uint256 claimableAmount,uint256 totalClaimed,uint256 lastClaimAt,uint256 nextLevel,uint256 nextThreshold,uint256 nextQualifiedBusiness,uint256 nextRequiredBusiness,uint256 nextPayoutAt))",

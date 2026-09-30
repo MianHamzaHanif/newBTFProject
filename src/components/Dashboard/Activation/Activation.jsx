@@ -98,26 +98,17 @@ export const Activation = () => {
               v2Manager.totalIncomeUsed(user),
             ]);
             const records = await Promise.all(Array.from({ length: Number(lengthRaw) }, async (_, index) => {
-              const [record, income] = await Promise.all([
-                v2Manager.getPackageHistoryAt(user, index),
-                // Keep existing history visible until the read-facet update
-                // is executed through the DAO.
-                v2Manager.getPackageIncomeStatus(user, index).catch(() => null),
-              ]);
+              const record = await v2Manager.getPackageHistoryAt(user, index);
               return {
                 v2Index: index, amount: BigInt(record.amount ?? record[0] ?? 0n), timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),
                 generated: BigInt(record.roiGenerated ?? record[3] ?? 0n), maximum: BigInt(record.roiMaximum ?? record[4] ?? 0n),
                 active: Boolean(record.active ?? record[5]),
-                incomeLimit: income ? BigInt(income.incomeLimit ?? income[0] ?? 0n) : incomeLimitForPackage(record.amount ?? record[0]),
-                // Before the read-facet upgrade is live, a one-package user
-                // can still read its exact used cap from the public aggregate.
-                // Multi-package rows deliberately remain blank until the
-                // FIFO-aware read function is available.
-                usedIncome: income
-                  ? BigInt(income.usedIncome ?? income[1] ?? 0n)
-                  : Number(lengthRaw) === 1
-                    ? (Boolean(record.active ?? record[5]) ? BigInt(aggregateUsed) : incomeLimitForPackage(record.amount ?? record[0]))
-                    : null,
+                // The existing Manager exposes aggregate used income. It is
+                // exact for a user with one package; do not mislabel it as a
+                // per-package value where multiple packages exist.
+                usedIncome: Number(lengthRaw) === 1
+                  ? (Boolean(record.active ?? record[5]) ? BigInt(aggregateUsed) : incomeLimitForPackage(record.amount ?? record[0]))
+                  : null,
                 };
             }));
             return { records, pendingRoi: BigInt(pendingRoi ?? 0n), roiDay: BigInt(roiDay ?? 0n) };
