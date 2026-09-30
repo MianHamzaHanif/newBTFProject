@@ -6,6 +6,7 @@ import { V2LedgerAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { hasImportedLegacyPackage } from "../../../blockchain/legacyPackageImportState";
 
 const formatUsdt = (value) => {
   try {
@@ -71,7 +72,7 @@ export default function V2Withdrawal() {
   const [v1Overview, setV1Overview] = useState(null);
   const [v1Loading, setV1Loading] = useState(false);
   const [v1Message, setV1Message] = useState("");
-  const [hasV1Registration, setHasV1Registration] = useState(false);
+  const [canWithdrawV1, setCanWithdrawV1] = useState(false);
   const [v1Withdrawing, setV1Withdrawing] = useState(false);
 
   const loadV1Overview = useCallback(async () => {
@@ -86,11 +87,17 @@ export default function V2Withdrawal() {
       const referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_REFERRAL_ABI, provider);
       const v1User = await referral.users(user);
       if (!Boolean(v1User?.exists ?? v1User?.[8])) {
-        setHasV1Registration(false);
+        setCanWithdrawV1(false);
         setV1Overview(null);
         return;
       }
-      setHasV1Registration(true);
+      const importedPackage = await hasImportedLegacyPackage(user);
+      if (importedPackage) {
+        setCanWithdrawV1(false);
+        setV1Overview(null);
+        return;
+      }
+      setCanWithdrawV1(true);
       const [
         directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable,
         levelClaimed, powerClaimed, rewardClaimed, packageValue, remainingUsdt,
@@ -110,7 +117,7 @@ export default function V2Withdrawal() {
       const incomeLimit = (BigInt(packageValue) * BigInt(incomeLimitBP)) / 10_000n;
       setV1Overview({ directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable, levelClaimed, powerClaimable, powerClaimed, rewardClaimable, rewardClaimed, incomeLimit, remainingUsdt, totalClaimable: BigInt(directClaimable) + BigInt(selfClaimable) + BigInt(levelClaimable) + BigInt(powerClaimable) + BigInt(rewardClaimable) });
     } catch (error) {
-      setHasV1Registration(false);
+      setCanWithdrawV1(false);
       setV1Overview(null);
       setV1Message(error?.shortMessage || error?.message || "Could not load V1 withdrawal overview.");
     } finally {
@@ -165,7 +172,7 @@ export default function V2Withdrawal() {
   // pathname for its active state, so hash-only links made both V1 and V2
   // appear selected and could leave mobile navigation on the wrong screen.
   // Keep the old V1 hash as a backwards-compatible deep link.
-  const showV1 = hasV1Registration && (
+  const showV1 = canWithdrawV1 && (
     location.pathname === "/withdrawal/v1" || location.hash === "#withdraw-v1"
   );
   const showV2 = !showV1;

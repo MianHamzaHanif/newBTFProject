@@ -43,7 +43,7 @@ async function readInBatches(length, readRecord) {
   return records;
 }
 
-export default function V2ClaimHistory({ eventName = "", heading = "Income History" }) {
+export default function V2ClaimHistory({ eventName = "", heading = "Claim History" }) {
   const [rows, setRows] = useState([]);
   const [v2Total, setV2Total] = useState("0.0000");
   const [message, setMessage] = useState("");
@@ -51,11 +51,7 @@ export default function V2ClaimHistory({ eventName = "", heading = "Income Histo
 
   const loadHistory = useCallback(async () => {
     const incomeType = eventIncomeType[eventName];
-    if (incomeType === undefined) {
-      setRows([]);
-      setMessage("Choose a specific income type to view its V2 claim history.");
-      return;
-    }
+    const isFiltered = incomeType !== undefined;
 
     const wallet = await getReadWalletAddress();
     if (!ethers.isAddress(wallet)) {
@@ -70,21 +66,29 @@ export default function V2ClaimHistory({ eventName = "", heading = "Income Histo
 
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, createBscReadProvider());
 
-      const v2LengthRaw = await v2Ledger.getUserIncomeHistoryLengthByType(wallet, incomeType);
+      // The Claim History route has no income-type selection. Read every V2
+      // ledger entry there; the individual income pages still use their own
+      // filtered history through eventName.
+      const v2LengthRaw = isFiltered
+        ? await v2Ledger.getUserIncomeHistoryLengthByType(wallet, incomeType)
+        : await v2Ledger.getUserIncomeHistoryLength(wallet);
+      const v2Records = await readInBatches(Number(v2LengthRaw), (index) => (
+        isFiltered
+          ? v2Ledger.getUserIncomeHistoryAtByType(wallet, incomeType, index)
+          : v2Ledger.getUserIncomeHistoryAt(wallet, index)
+      ));
 
-      const v2Records = await readInBatches(Number(v2LengthRaw), (index) =>
-        v2Ledger.getUserIncomeHistoryAtByType(wallet, incomeType, index)
-      );
-
-      const v2Sum = v2Records.reduce((total, record) => total + BigInt(record.amount ?? record[1] ?? 0n), 0n);
+      const v2Sum = v2Records.reduce((total, record) => total + BigInt(
+        isFiltered ? (record.amount ?? record[1] ?? 0n) : (record.amount ?? record[2] ?? 0n),
+      ), 0n);
       setV2Total(formatAmount(v2Sum));
 
       const combinedRows = v2Records.map((record) => ({
           network: "V2 (New)",
-          incomeType: incomeName[incomeType],
-          level: Number(record.level ?? record[0]) || "-",
-          amount: formatAmount(record.amount ?? record[1]),
-          timestamp: formatTime(record.timestamp ?? record[2])
+          incomeType: isFiltered ? incomeName[incomeType] : incomeName[Number(record.incomeType ?? record[0])] || "Unknown",
+          level: Number(record.level ?? record[isFiltered ? 0 : 1]) || "-",
+          amount: formatAmount(record.amount ?? record[isFiltered ? 1 : 2]),
+          timestamp: formatTime(record.timestamp ?? record[isFiltered ? 2 : 3])
         })).map((record, index) => ({ ...record, sno: index + 1 }));
 
       setRows(combinedRows);
