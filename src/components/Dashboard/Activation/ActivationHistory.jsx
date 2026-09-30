@@ -76,6 +76,7 @@ export const ActivationHistory = () => {
               return {
                 source: "V1", sourceIndex: index, timestamp: stake.timestamp ?? stake[7],
                 package: `${formatUsdt(amount)} USDT`, income: `${formatUsdt(used)} / ${formatUsdt(limit)} USDT`,
+                incomeCap: `${formatUsdt(used)} / ${formatUsdt(limit)} USDT`,
                 status: (income.completed ?? income[3]) ? "Completed" : "Active",
               };
             });
@@ -83,13 +84,21 @@ export const ActivationHistory = () => {
           (async () => {
             const length = Number(await v2Manager.getPackageHistoryLength(walletAddress));
             return readInBatches(length, async (index) => {
-              const record = await v2Manager.getPackageHistoryAt(walletAddress, index);
+              const [record, income] = await Promise.all([
+                v2Manager.getPackageHistoryAt(walletAddress, index),
+                // The fallback keeps the old history table usable until the
+                // DAO executes the read-facet selector update.
+                v2Manager.getPackageIncomeStatus(walletAddress, index).catch(() => null),
+              ]);
               const generated = record.roiGenerated ?? record[3];
               const maximum = record.roiMaximum ?? record[4];
               const active = record.active ?? record[5];
               return {
                 source: "V2", sourceIndex: index, timestamp: record.purchasedAt ?? record[1],
                 package: `${formatUsdt(record.amount ?? record[0])} USDT`, income: `${formatUsdt(generated)} / ${formatUsdt(maximum)} USDT`,
+                incomeCap: income
+                  ? `${formatUsdt(income.usedIncome ?? income[1])} / ${formatUsdt(income.incomeLimit ?? income[0])} USDT`
+                  : "Available after read-facet update",
                 status: active ? (generated < maximum ? "Active" : "Self ROI Complete") : "Inactive",
               };
             });
@@ -143,6 +152,7 @@ export const ActivationHistory = () => {
     { id: "sourceIndex", label: "Package Index", sortable: true },
     { id: "package", label: "Package", sortable: true },
     { id: "purchasedAt", label: "Purchase Date", sortable: true },
+    { id: "incomeCap", label: "USDT Used / Limit", sortable: true },
     { id: "income", label: "ROI Generated / Limit", sortable: true },
     { id: "status", label: "Status", sortable: true },
   ];
@@ -155,6 +165,7 @@ export const ActivationHistory = () => {
       <TableCell align="center">#{row.sourceIndex}</TableCell>
       <TableCell align="center">{row.package}</TableCell>
       <TableCell align="center">{row.purchasedAt}</TableCell>
+      <TableCell align="center">{row.incomeCap}</TableCell>
       <TableCell align="center">{row.income}</TableCell>
       <TableCell align="center"><span className={`${row.status === "Active" ? "active" : "in-active"} status`}>{row.status}</span></TableCell>
     </>} />

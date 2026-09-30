@@ -82,6 +82,8 @@ export const Activation = () => {
               return {
                 v1Index: index, amount, timestamp: BigInt(stake?.timestamp ?? stake?.[7] ?? 0n), maximum, generated,
                 claimable: BigInt(roi?.claimable ?? roi?.[4] ?? 0n), incomeLimit: BigInt(income?.incomeLimit ?? income?.[0] ?? 0n),
+                usedIncome: BigInt(income?.usedIncome ?? income?.[1] ?? 0n),
+                remainingIncome: BigInt(income?.remainingIncome ?? income?.[2] ?? 0n),
                 // The V1 income-cap completion flag is the real package
                 // state. Self ROI may be below its own cap even though this
                 // package has already completed its overall income limit.
@@ -95,11 +97,19 @@ export const Activation = () => {
               v2Manager.getPackageHistoryLength(user), v2Manager.pendingSelfRoi(user), v2Manager.ROI_DAY(),
             ]);
             const records = await Promise.all(Array.from({ length: Number(lengthRaw) }, async (_, index) => {
-              const record = await v2Manager.getPackageHistoryAt(user, index);
+              const [record, income] = await Promise.all([
+                v2Manager.getPackageHistoryAt(user, index),
+                // Keep existing history visible until the read-facet update
+                // is executed through the DAO.
+                v2Manager.getPackageIncomeStatus(user, index).catch(() => null),
+              ]);
               return {
                 v2Index: index, amount: BigInt(record.amount ?? record[0] ?? 0n), timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),
                 generated: BigInt(record.roiGenerated ?? record[3] ?? 0n), maximum: BigInt(record.roiMaximum ?? record[4] ?? 0n),
                 active: Boolean(record.active ?? record[5]),
+                incomeLimit: income ? BigInt(income.incomeLimit ?? income[0] ?? 0n) : incomeLimitForPackage(record.amount ?? record[0]),
+                usedIncome: income ? BigInt(income.usedIncome ?? income[1] ?? 0n) : null,
+                remainingIncome: income ? BigInt(income.remainingIncome ?? income[2] ?? 0n) : null,
               };
             }));
             return { records, pendingRoi: BigInt(pendingRoi ?? 0n), roiDay: BigInt(roiDay ?? 0n) };
@@ -132,12 +142,17 @@ export const Activation = () => {
         const viewRows = [
           ...visibleV1.map((record) => ({
             ...record, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp),
+            packageIndex: `V1 #${record.v1Index}`, incomeLimitDisplay: formatUsdt(record.incomeLimit),
+            usedIncomeDisplay: formatUsdt(record.usedIncome), remainingIncomeDisplay: formatUsdt(record.remainingIncome),
             roiMaximum: formatUsdt(record.maximum), status: record.active ? "V1 Active - ROI Running" : "V1 Inactive - Package Limit Completed", roiStatus: record.active ? "Yes" : "No",
           })),
           ...v2.records.map((record) => {
             const roiActive = record.active && record.generated < record.maximum;
             return {
               ...record, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp), roiMaximum: formatUsdt(record.maximum),
+              packageIndex: `V2 #${record.v2Index}`, incomeLimitDisplay: formatUsdt(record.incomeLimit),
+              usedIncomeDisplay: record.usedIncome === null ? "-" : formatUsdt(record.usedIncome),
+              remainingIncomeDisplay: record.remainingIncome === null ? "-" : formatUsdt(record.remainingIncome),
               status: record.active ? (roiActive ? "V2 Active - ROI Running" : "V2 Active - Self ROI Complete") : "V2 Inactive", roiStatus: roiActive ? "Yes" : "No",
             };
           }),
@@ -170,7 +185,11 @@ export const Activation = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
+    { id: "packageIndex", label: "Package Index", sortable: true },
     { id: "packageAmount", label: "Package Amount", sortable: true }, { id: "purchasedAt", label: "Purchased At", sortable: true },
+    { id: "incomeLimitDisplay", label: "USDT Income Limit", sortable: true },
+    { id: "usedIncomeDisplay", label: "USDT Used", sortable: true },
+    { id: "remainingIncomeDisplay", label: "USDT Remaining", sortable: true },
     { id: "roiMaximum", label: "Self ROI 3x Limit", sortable: true }, { id: "status", label: "Package Status", sortable: true },
     { id: "roiStatus", label: "Self ROI Active", sortable: true },
   ];
@@ -190,8 +209,8 @@ export const Activation = () => {
       {isLoading && <p className="team-loading">Loading  package details...</p>}
       {!isLoading && message && <p className="team-loading">{message}</p>}
       <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
-        <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.packageAmount}</TableCell>
-        <TableCell align="center">{row.purchasedAt}</TableCell><TableCell align="center">{row.roiMaximum}</TableCell><TableCell align="center">{row.status}</TableCell><TableCell align="center">{row.roiStatus}</TableCell>
+        <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.packageIndex}</TableCell><TableCell align="center">{row.packageAmount}</TableCell>
+        <TableCell align="center">{row.purchasedAt}</TableCell><TableCell align="center">{row.incomeLimitDisplay}</TableCell><TableCell align="center">{row.usedIncomeDisplay}</TableCell><TableCell align="center">{row.remainingIncomeDisplay}</TableCell><TableCell align="center">{row.roiMaximum}</TableCell><TableCell align="center">{row.status}</TableCell><TableCell align="center">{row.roiStatus}</TableCell>
       </>} />
     </div></div>
   </div>;
