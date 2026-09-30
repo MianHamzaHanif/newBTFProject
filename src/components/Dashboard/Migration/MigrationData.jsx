@@ -22,6 +22,8 @@ const VERIFIED_IMPORTER_ABI = [
   "function fundingSource() view returns(address)",
   "function importPackage(address user,uint256 sourceIndex)",
   "function importPackages(address user,uint256[] sourceIndices)",
+  "function importPackageWithV2SelfRoi(address user,uint256 sourceIndex)",
+  "function importPackagesWithV2SelfRoi(address user,uint256[] sourceIndices)",
   "function legacyLevelRoiImported(address) view returns(bool)",
   "function importPendingLevelRoiFromV1(address user,uint256[15] amounts)"
 ];
@@ -139,6 +141,7 @@ export default function MigrationData() {
   const [activeV1Packages, setActiveV1Packages] = useState([]);
   const [activeV1DirectIncome, setActiveV1DirectIncome] = useState(0n);
   const [activePackageCheckError, setActivePackageCheckError] = useState("");
+  const [includeV1IncomeAndV2SelfRoi, setIncludeV1IncomeAndV2SelfRoi] = useState(false);
   const [levelBusiness, setLevelBusiness] = useState(Array(15).fill("0"));
   const [refreshingLevelBusiness, setRefreshingLevelBusiness] = useState(false);
   const [levelBusinessRefreshError, setLevelBusinessRefreshError] = useState("");
@@ -345,12 +348,18 @@ export default function MigrationData() {
       // `imported(user)` only means at least one V1 index was imported. A
       // later correction may still need to add a different active V1 source
       // index, so duplicate prevention is enforced on-chain per index.
-      const tx = sourceIndexes.length === 1
-        ? await importer.importPackage(beneficiary, sourceIndexes[0])
-        : await importer.importPackages(beneficiary, sourceIndexes);
-      setMessage("Confirm the verified V1-to-V2 package import transaction in your wallet.");
+      const tx = includeV1IncomeAndV2SelfRoi
+        ? sourceIndexes.length === 1
+          ? await importer.importPackageWithV2SelfRoi(beneficiary, sourceIndexes[0])
+          : await importer.importPackagesWithV2SelfRoi(beneficiary, sourceIndexes)
+        : sourceIndexes.length === 1
+          ? await importer.importPackage(beneficiary, sourceIndexes[0])
+          : await importer.importPackages(beneficiary, sourceIndexes);
+      setMessage(includeV1IncomeAndV2SelfRoi
+        ? "Confirm the V1-withdrawal-disabled package import. Pending Direct/Self ROI will migrate and future V2 Self ROI will start."
+        : "Confirm the normal V1-to-V2 package import. V1 pending Direct/Self ROI and future legacy Self ROI are excluded.");
       await tx.wait();
-      setMessage(`Verified V1 package index ${sourceIndexes.join(", ")} imported successfully.`);
+      setMessage(`Verified V1 package index ${sourceIndexes.join(", ")} imported successfully${includeV1IncomeAndV2SelfRoi ? " with V1 income and V2 Self ROI continuation" : " (normal import)"}.`);
       window.dispatchEvent(new Event("btf:v2-data-changed"));
     } catch (error) {
       setMessage(await packageFundingErrorMessage(beneficiary, sourceIndexes, error));
@@ -723,6 +732,11 @@ export default function MigrationData() {
       </div>
       <div className="migration-package-import-column">
         <Field label="Active V1 Package Index / Indexes" value={values.sourceIndex} onChange={(value) => setValue("sourceIndex", value)} placeholder="e.g. 2 or 6,7" />
+        <label className="migration-special-import-toggle">
+          <input type="checkbox" checked={includeV1IncomeAndV2SelfRoi} onChange={(event) => setIncludeV1IncomeAndV2SelfRoi(event.target.checked)} />
+          <span><strong>V1 withdrawal disabled — migrate income and continue V2 Self ROI</strong><small>Use only when V1 withdrawal is permanently closed. It copies V1 pending Direct Income and pending Self ROI once, then starts future V2 Self ROI for these imported packages.</small></span>
+        </label>
+        {!includeV1IncomeAndV2SelfRoi && <p className="migration-import-mode-note">Normal import: package + used limit only. V1 income stays in V1.</p>}
         <div className="migration-actions"><button
           type="button"
           className="migration-primary-button"
