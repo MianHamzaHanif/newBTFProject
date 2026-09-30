@@ -247,7 +247,11 @@ const DashboardTop = () => {
         { length: Number(v1StakeLengthRaw ?? 0n) },
         async (_, index) => {
           const stake = await v1Manager.userStakeHistory(wallet, index);
-          return { index, amount: BigInt(stake?.packageValue ?? stake?.[0] ?? 0n) };
+          return {
+            index,
+            amount: BigInt(stake?.packageValue ?? stake?.[0] ?? 0n),
+            timestamp: BigInt(stake?.timestamp ?? stake?.[7] ?? 0n),
+          };
         },
       ));
       const [importedV1Indexes, v2ClaimedIncomeRecords, v2Packages] = await Promise.all([
@@ -260,25 +264,43 @@ const DashboardTop = () => {
           { length: Number(v2PackageHistoryLengthRaw ?? 0n) },
           async (_, index) => {
             const record = await v2Manager.getPackageHistoryAt(wallet, index);
-            return BigInt(record.amount ?? record[0] ?? 0n);
+            return {
+              amount: BigInt(record.amount ?? record[0] ?? 0n),
+              timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),
+            };
           },
         )),
       ]);
-      const visibleV1Investment = v1Packages.reduce(
-        (total, item) => importedV1Indexes?.has(item.index) ? total : total + item.amount,
-        0n,
-      );
+      // The importer event is authoritative. If an RPC rejects the old log
+      // range, use the same amount+purchase-time fallback as Activation and
+      // Dashboard totals so a migrated V1 package is never counted twice.
+      let visibleV1Packages;
+      if (importedV1Indexes) {
+        visibleV1Packages = v1Packages.filter((item) => !importedV1Indexes.has(item.index));
+      } else {
+        const v2Matches = new Map();
+        for (const item of v2Packages) {
+          const key = `${item.amount}|${item.timestamp}`;
+          v2Matches.set(key, (v2Matches.get(key) || 0) + 1);
+        }
+        visibleV1Packages = v1Packages.filter((item) => {
+          const key = `${item.amount}|${item.timestamp}`;
+          const matches = v2Matches.get(key) || 0;
+          if (!matches) return true;
+          v2Matches.set(key, matches - 1);
+          return false;
+        });
+      }
+      const visibleV1Investment = visibleV1Packages.reduce((total, item) => total + item.amount, 0n);
       const totalInvestment = visibleV1Investment + BigInt(v2Invested ?? 0n);
       // The limit is package-tier based, never a blanket investment × 3:
       // 25→3x, 100→5x, 500→7x and 1000→10x. Imported V1 package indexes
       // were removed above, while their V2 package rows are included here.
-      const combinedIncomeLimit = v1Packages.reduce(
-        (total, item) => importedV1Indexes?.has(item.index)
-          ? total
-          : total + incomeLimitForPackage(item.amount),
+      const combinedIncomeLimit = visibleV1Packages.reduce(
+        (total, item) => total + incomeLimitForPackage(item.amount),
         0n,
       ) + v2Packages.reduce(
-        (total, amount) => total + incomeLimitForPackage(amount),
+        (total, item) => total + incomeLimitForPackage(item.amount),
         0n,
       );
       const feeBP = BigInt(v1FeeBP ?? 0n);
