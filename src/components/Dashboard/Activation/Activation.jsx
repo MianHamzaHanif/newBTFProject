@@ -183,7 +183,6 @@ export const Activation = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "packageIndex", label: "Package Index", sortable: true },
     { id: "packageAmount", label: "Package Amount", sortable: true }, { id: "purchasedAt", label: "Purchased At", sortable: true },
     { id: "usedIncomeDisplay", label: "Used Limit (USDT)", sortable: true },
     { id: "roiMaximum", label: "Self ROI 3x Limit", sortable: true }, { id: "status", label: "Package Status", sortable: true },
@@ -205,7 +204,7 @@ export const Activation = () => {
       {isLoading && <p className="team-loading">Loading  package details...</p>}
       {!isLoading && message && <p className="team-loading">{message}</p>}
       <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
-        <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.packageIndex}</TableCell><TableCell align="center">{row.packageAmount}</TableCell>
+        <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.packageAmount}</TableCell>
         <TableCell align="center">{row.purchasedAt}</TableCell><TableCell align="center">{row.usedIncomeDisplay}</TableCell><TableCell align="center">{row.roiMaximum}</TableCell><TableCell align="center">{row.status}</TableCell><TableCell align="center">{row.roiStatus}</TableCell>
       </>} />
     </div></div>

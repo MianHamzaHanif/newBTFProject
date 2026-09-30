@@ -31,7 +31,9 @@ const V1_REFERRAL_ABI = [
   "function getSelfRoiClaimableFor(address) view returns(uint256)",
   "function getTotalLevelRoiClaimableFor(address) view returns(uint256)",
   "function getUserIncomeWithdrawRecordsLengthByType(address,uint8) view returns(uint256)",
-  "function getUserIncomeWithdrawRecordAtByType(address,uint8,uint256) view returns(address user,uint8 incomeType,uint256 amount,address source,uint256 timestamp)",
+  // The type-filtered V1 getter returns four fields.  `incomeType` is an
+  // input filter and is not repeated in its result tuple.
+  "function getUserIncomeWithdrawRecordAtByType(address,uint8,uint256) view returns(address user,uint256 amount,address source,uint256 timestamp)",
 ];
 
 const formatAmount = (amount) => {
@@ -91,8 +93,8 @@ async function readV1Income(wallet, incomeType) {
     return {
       network: "V1 (Legacy)",
       incomeType: incomeName[incomeType],
-      amount: BigInt(record.amount ?? record[2] ?? 0n),
-      timestamp: BigInt(record.timestamp ?? record[4] ?? 0n),
+      amount: BigInt(record.amount ?? record[1] ?? 0n),
+      timestamp: BigInt(record.timestamp ?? record[3] ?? 0n),
     };
   });
   return { pending: BigInt(pending), claimed: BigInt(claimed), records };
@@ -181,7 +183,6 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
   const hasIncomeType = eventIncomeType[eventName] !== undefined;
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "network", label: "Source", sortable: true },
     { id: "incomeType", label: "Income Type", sortable: true },
     { id: "amountDisplay", label: "Claimed USDT", sortable: true },
     { id: "timestampDisplay", label: "Claim Time", sortable: true },
@@ -200,7 +201,6 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
       {message && <p className="team-loading">{message}</p>}
       <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
         <TableCell align="center">{row.sno}</TableCell>
-        <TableCell align="center">{row.network}</TableCell>
         <TableCell align="center">{row.incomeType}</TableCell>
         <TableCell align="center">{row.amountDisplay}</TableCell>
         <TableCell align="center" className="team-time-cell">{row.timestampDisplay}</TableCell>

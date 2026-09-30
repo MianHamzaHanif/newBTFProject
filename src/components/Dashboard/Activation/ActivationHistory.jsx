@@ -146,7 +146,6 @@ export const ActivationHistory = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
-    { id: "sourceIndex", label: "Package Index", sortable: true },
     { id: "package", label: "Package", sortable: true },
     { id: "purchasedAt", label: "Purchase Date", sortable: true },
     { id: "usedIncome", label: "Used Limit (USDT)", sortable: true },
@@ -159,7 +158,6 @@ export const ActivationHistory = () => {
     {!isLoading && loadMessage && <p className="team-loading">{loadMessage}</p>}
     <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
       <TableCell align="center">{row.sno}</TableCell>
-      <TableCell align="center">#{row.sourceIndex}</TableCell>
       <TableCell align="center">{row.package}</TableCell>
       <TableCell align="center">{row.purchasedAt}</TableCell>
       <TableCell align="center">{row.usedIncome === null ? "-" : `${formatUsdt(row.usedIncome)} USDT`}</TableCell>
