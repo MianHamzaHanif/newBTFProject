@@ -93,8 +93,9 @@ export const Activation = () => {
             return { records, oneDay: BigInt(oneDay ?? 86400n) };
           })(),
           (async () => {
-            const [lengthRaw, pendingRoi, roiDay] = await Promise.all([
+            const [lengthRaw, pendingRoi, roiDay, aggregateUsed] = await Promise.all([
               v2Manager.getPackageHistoryLength(user), v2Manager.pendingSelfRoi(user), v2Manager.ROI_DAY(),
+              v2Manager.totalIncomeUsed(user),
             ]);
             const records = await Promise.all(Array.from({ length: Number(lengthRaw) }, async (_, index) => {
               const [record, income] = await Promise.all([
@@ -108,9 +109,16 @@ export const Activation = () => {
                 generated: BigInt(record.roiGenerated ?? record[3] ?? 0n), maximum: BigInt(record.roiMaximum ?? record[4] ?? 0n),
                 active: Boolean(record.active ?? record[5]),
                 incomeLimit: income ? BigInt(income.incomeLimit ?? income[0] ?? 0n) : incomeLimitForPackage(record.amount ?? record[0]),
-                usedIncome: income ? BigInt(income.usedIncome ?? income[1] ?? 0n) : null,
-                remainingIncome: income ? BigInt(income.remainingIncome ?? income[2] ?? 0n) : null,
-              };
+                // Before the read-facet upgrade is live, a one-package user
+                // can still read its exact used cap from the public aggregate.
+                // Multi-package rows deliberately remain blank until the
+                // FIFO-aware read function is available.
+                usedIncome: income
+                  ? BigInt(income.usedIncome ?? income[1] ?? 0n)
+                  : Number(lengthRaw) === 1
+                    ? (Boolean(record.active ?? record[5]) ? BigInt(aggregateUsed) : incomeLimitForPackage(record.amount ?? record[0]))
+                    : null,
+                };
             }));
             return { records, pendingRoi: BigInt(pendingRoi ?? 0n), roiDay: BigInt(roiDay ?? 0n) };
           })(),
@@ -143,16 +151,15 @@ export const Activation = () => {
           ...visibleV1.map((record) => ({
             ...record, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp),
             packageIndex: `V1 #${record.v1Index}`, incomeLimitDisplay: formatUsdt(record.incomeLimit),
-            usedIncomeDisplay: formatUsdt(record.usedIncome), remainingIncomeDisplay: formatUsdt(record.remainingIncome),
+            usedIncomeDisplay: formatUsdt(record.usedIncome),
             roiMaximum: formatUsdt(record.maximum), status: record.active ? "V1 Active - ROI Running" : "V1 Inactive - Package Limit Completed", roiStatus: record.active ? "Yes" : "No",
           })),
           ...v2.records.map((record) => {
             const roiActive = record.active && record.generated < record.maximum;
             return {
               ...record, packageAmount: formatUsdt(record.amount), purchasedAt: formatTime(record.timestamp), roiMaximum: formatUsdt(record.maximum),
-              packageIndex: `V2 #${record.v2Index}`, incomeLimitDisplay: formatUsdt(record.incomeLimit),
+              packageIndex: `V2 #${record.v2Index}`,
               usedIncomeDisplay: record.usedIncome === null ? "-" : formatUsdt(record.usedIncome),
-              remainingIncomeDisplay: record.remainingIncome === null ? "-" : formatUsdt(record.remainingIncome),
               status: record.active ? (roiActive ? "V2 Active - ROI Running" : "V2 Active - Self ROI Complete") : "V2 Inactive", roiStatus: roiActive ? "Yes" : "No",
             };
           }),
@@ -187,9 +194,7 @@ export const Activation = () => {
     { id: "sno", label: "S. No", sortable: true },
     { id: "packageIndex", label: "Package Index", sortable: true },
     { id: "packageAmount", label: "Package Amount", sortable: true }, { id: "purchasedAt", label: "Purchased At", sortable: true },
-    { id: "incomeLimitDisplay", label: "USDT Income Limit", sortable: true },
-    { id: "usedIncomeDisplay", label: "USDT Used", sortable: true },
-    { id: "remainingIncomeDisplay", label: "USDT Remaining", sortable: true },
+    { id: "usedIncomeDisplay", label: "Used Limit (USDT)", sortable: true },
     { id: "roiMaximum", label: "Self ROI 3x Limit", sortable: true }, { id: "status", label: "Package Status", sortable: true },
     { id: "roiStatus", label: "Self ROI Active", sortable: true },
   ];
@@ -210,7 +215,7 @@ export const Activation = () => {
       {!isLoading && message && <p className="team-loading">{message}</p>}
       <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
         <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.packageIndex}</TableCell><TableCell align="center">{row.packageAmount}</TableCell>
-        <TableCell align="center">{row.purchasedAt}</TableCell><TableCell align="center">{row.incomeLimitDisplay}</TableCell><TableCell align="center">{row.usedIncomeDisplay}</TableCell><TableCell align="center">{row.remainingIncomeDisplay}</TableCell><TableCell align="center">{row.roiMaximum}</TableCell><TableCell align="center">{row.status}</TableCell><TableCell align="center">{row.roiStatus}</TableCell>
+        <TableCell align="center">{row.purchasedAt}</TableCell><TableCell align="center">{row.usedIncomeDisplay}</TableCell><TableCell align="center">{row.roiMaximum}</TableCell><TableCell align="center">{row.status}</TableCell><TableCell align="center">{row.roiStatus}</TableCell>
       </>} />
     </div></div>
   </div>;

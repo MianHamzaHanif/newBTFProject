@@ -76,13 +76,17 @@ export const ActivationHistory = () => {
               return {
                 source: "V1", sourceIndex: index, timestamp: stake.timestamp ?? stake[7],
                 package: `${formatUsdt(amount)} USDT`, income: `${formatUsdt(used)} / ${formatUsdt(limit)} USDT`,
-                incomeCap: `${formatUsdt(used)} / ${formatUsdt(limit)} USDT`,
+                usedIncome: used,
                 status: (income.completed ?? income[3]) ? "Completed" : "Active",
               };
             });
           })(),
           (async () => {
-            const length = Number(await v2Manager.getPackageHistoryLength(walletAddress));
+            const [lengthRaw, aggregateUsed] = await Promise.all([
+              v2Manager.getPackageHistoryLength(walletAddress),
+              v2Manager.totalIncomeUsed(walletAddress),
+            ]);
+            const length = Number(lengthRaw);
             return readInBatches(length, async (index) => {
               const [record, income] = await Promise.all([
                 v2Manager.getPackageHistoryAt(walletAddress, index),
@@ -96,9 +100,11 @@ export const ActivationHistory = () => {
               return {
                 source: "V2", sourceIndex: index, timestamp: record.purchasedAt ?? record[1],
                 package: `${formatUsdt(record.amount ?? record[0])} USDT`, income: `${formatUsdt(generated)} / ${formatUsdt(maximum)} USDT`,
-                incomeCap: income
-                  ? `${formatUsdt(income.usedIncome ?? income[1])} / ${formatUsdt(income.incomeLimit ?? income[0])} USDT`
-                  : "Available after read-facet update",
+                usedIncome: income
+                  ? income.usedIncome ?? income[1]
+                  : length === 1
+                    ? (active ? aggregateUsed : null)
+                    : null,
                 status: active ? (generated < maximum ? "Active" : "Self ROI Complete") : "Inactive",
               };
             });
@@ -152,7 +158,7 @@ export const ActivationHistory = () => {
     { id: "sourceIndex", label: "Package Index", sortable: true },
     { id: "package", label: "Package", sortable: true },
     { id: "purchasedAt", label: "Purchase Date", sortable: true },
-    { id: "incomeCap", label: "USDT Used / Limit", sortable: true },
+    { id: "usedIncome", label: "Used Limit (USDT)", sortable: true },
     { id: "income", label: "ROI Generated / Limit", sortable: true },
     { id: "status", label: "Status", sortable: true },
   ];
@@ -165,7 +171,7 @@ export const ActivationHistory = () => {
       <TableCell align="center">#{row.sourceIndex}</TableCell>
       <TableCell align="center">{row.package}</TableCell>
       <TableCell align="center">{row.purchasedAt}</TableCell>
-      <TableCell align="center">{row.incomeCap}</TableCell>
+      <TableCell align="center">{row.usedIncome === null ? "-" : `${formatUsdt(row.usedIncome)} USDT`}</TableCell>
       <TableCell align="center">{row.income}</TableCell>
       <TableCell align="center"><span className={`${row.status === "Active" ? "active" : "in-active"} status`}>{row.status}</span></TableCell>
     </>} />
