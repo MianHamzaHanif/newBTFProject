@@ -161,8 +161,14 @@ export default function V2Withdrawal() {
   const refreshAll = async () => {
     await Promise.all([load(), loadV1Overview()]);
   };
-  const showV1 = hasV1Registration && location.hash === "#withdraw-v1";
-  const showV2 = location.hash !== "#withdraw-v1";
+  // Use distinct routes rather than URL hashes. NavLink only compares the
+  // pathname for its active state, so hash-only links made both V1 and V2
+  // appear selected and could leave mobile navigation on the wrong screen.
+  // Keep the old V1 hash as a backwards-compatible deep link.
+  const showV1 = hasV1Registration && (
+    location.pathname === "/withdrawal/v1" || location.hash === "#withdraw-v1"
+  );
+  const showV2 = !showV1;
 
   const withdraw = async () => {
     if (!window.ethereum) {

@@ -129,7 +129,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       return;
     }
 
-    if (path === "/withdrawal" || path === "/withdrawal-history") {
+    if (path.startsWith("/withdrawal") || path === "/withdrawal-history") {
       setActiveDropdown("withdrawal");
       return;
     }
@@ -353,14 +353,14 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
             {activeDropdown === "withdrawal" && (
               <div className="dropdown open withdrawal-dropdown">
                 {hasV1Registration && <NavLink
-                  to="/withdrawal#withdraw-v1"
+                  to="/withdrawal/v1"
                   className="nav"
                   onClick={handleNavItemClick}
                 >
                   <p className="nav-item sub">Withdraw V1</p>
                 </NavLink>}
                 <NavLink
-                  to="/withdrawal#withdraw-v2"
+                  to="/withdrawal/v2"
                   className="nav"
                   onClick={handleNavItemClick}
                 >
