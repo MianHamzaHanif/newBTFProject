@@ -30,8 +30,8 @@ const V1_MANAGER_ABI = [
   "function totalPowerIncomeClaimed(address) view returns(uint256)",
   "function totalRewardIncomeClaimed(address) view returns(uint256)",
   "function totalPackageValue(address) view returns(uint256)",
-  "function incomeWalletToken(address) view returns(uint256)",
-  "function incomeLimitBP() view returns(uint256)",
+  "function getStakeHistoryLength(address) view returns(uint256)",
+  "function getStakeIncomeStatus(address,uint256) view returns(uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool completed)",
   "function powerIncomeModule() view returns(address)",
   "function rewardIncomeModule() view returns(address)",
   "function withdrawIncome() external",
@@ -100,22 +100,27 @@ export default function V2Withdrawal() {
       setCanWithdrawV1(true);
       const [
         directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable,
-        levelClaimed, powerClaimed, rewardClaimed, packageValue, remainingUsdt,
-        incomeLimitBP, powerModuleAddress, rewardModuleAddress,
+        levelClaimed, powerClaimed, rewardClaimed, stakeHistoryLength,
+        powerModuleAddress, rewardModuleAddress,
       ] = await Promise.all([
         manager.pendingDirectIncomeToken(user), manager.totalDirectIncomeToken(user),
         referral.getSelfRoiClaimableFor(user), manager.totalSelfRoiIncomeClaimed(user),
         referral.getTotalLevelRoiClaimableFor(user), manager.totalLevelRoiClaimed(user),
         manager.totalPowerIncomeClaimed(user), manager.totalRewardIncomeClaimed(user),
-        manager.totalPackageValue(user), manager.incomeWalletToken(user), manager.incomeLimitBP(),
+        manager.getStakeHistoryLength(user),
         manager.powerIncomeModule(), manager.rewardIncomeModule(),
       ]);
       const [powerClaimable, rewardClaimable] = await Promise.all([
         new ethers.Contract(powerModuleAddress, V1_RANK_MODULE_ABI, provider).rawClaimable(user),
         new ethers.Contract(rewardModuleAddress, V1_RANK_MODULE_ABI, provider).rawClaimable(user),
       ]);
-      const incomeLimit = (BigInt(packageValue) * BigInt(incomeLimitBP)) / 10_000n;
-      setV1Overview({ directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable, levelClaimed, powerClaimable, powerClaimed, rewardClaimable, rewardClaimed, incomeLimit, remainingUsdt, totalClaimable: BigInt(directClaimable) + BigInt(selfClaimable) + BigInt(levelClaimable) + BigInt(powerClaimable) + BigInt(rewardClaimable) });
+      // V1's public incomeLimitBP is a legacy aggregate rate and does not
+      // represent the tier cap of a $25/$100/$500/$1000 package. Sum the
+      // contract's own per-package limits instead.
+      const incomeLimit = (await Promise.all(
+        Array.from({ length: Number(stakeHistoryLength) }, (_, index) => manager.getStakeIncomeStatus(user, index))
+      )).reduce((total, status) => total + BigInt(status.incomeLimit ?? status[0] ?? 0n), 0n);
+      setV1Overview({ directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable, levelClaimed, powerClaimable, powerClaimed, rewardClaimable, rewardClaimed, incomeLimit, totalClaimable: BigInt(directClaimable) + BigInt(selfClaimable) + BigInt(levelClaimable) + BigInt(powerClaimable) + BigInt(rewardClaimable) });
     } catch (error) {
       setCanWithdrawV1(false);
       setV1Overview(null);
@@ -254,7 +259,6 @@ export default function V2Withdrawal() {
           <div className="withdrawal-card"><p className="withdrawal-card-title">Reward Claimable</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.rewardClaimable)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Total Reward Income Claimed</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.rewardClaimed)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Income Limit Token</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.incomeLimit)} USDT</h4></div>
-          <div className="withdrawal-card"><p className="withdrawal-card-title">Remaining USDT</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.remainingUsdt)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimable Income</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.totalClaimable)} USDT</h4></div>
         </div>
         <div className="withdraw-action-wrap">
