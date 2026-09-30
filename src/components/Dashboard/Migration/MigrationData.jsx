@@ -342,7 +342,9 @@ export default function MigrationData() {
       // by doing a separate V2-tree preflight here: the importer/manager is
       // the source of truth and will return its exact on-chain reason if a
       // prerequisite is still missing.
-      if (await importer.imported(beneficiary)) throw new Error("Active V1 packages are already imported for this user.");
+      // `imported(user)` only means at least one V1 index was imported. A
+      // later correction may still need to add a different active V1 source
+      // index, so duplicate prevention is enforced on-chain per index.
       const tx = sourceIndexes.length === 1
         ? await importer.importPackage(beneficiary, sourceIndexes[0])
         : await importer.importPackages(beneficiary, sourceIndexes);
