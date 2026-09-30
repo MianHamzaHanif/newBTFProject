@@ -2,10 +2,9 @@ import { ethers } from "ethers";
 import { V2VerifiedLegacyImporterAddress } from "./address";
 import { createBscReadProvider } from "./readProvider";
 
-// A package import moves the user's V1 package liability into V2.  It is the
-// only migration action which closes the V1 withdrawal route.  A Level
-// Business Seed is deliberately not included: it only seeds team business.
-const IMPORTER_ABI = ["function imported(address) view returns(bool)"];
+// Normal package import deliberately leaves V1 withdrawal available. Only
+// the explicit withdrawal-disabled path records this snapshot flag.
+const IMPORTER_ABI = ["function legacyPendingDirectSnapshotTaken(address) view returns(bool)"];
 
 // Keep prior verified importer deployments here as well as the currently
 // configured deployment. A user may have been imported before the importer
@@ -26,11 +25,11 @@ export async function hasImportedLegacyPackage(user) {
   )];
   const provider = createBscReadProvider();
   const results = await Promise.allSettled(
-    importers.map((address) => new ethers.Contract(address, IMPORTER_ABI, provider).imported(user)),
+    importers.map((address) => new ethers.Contract(address, IMPORTER_ABI, provider).legacyPendingDirectSnapshotTaken(user)),
   );
   const readable = results.filter((result) => result.status === "fulfilled");
 
   // Never let an RPC outage accidentally re-enable a V1 withdrawal route.
-  if (readable.length === 0) throw new Error("Could not verify V1 package import status.");
+  if (readable.length === 0) throw new Error("Could not verify V1 withdrawal migration status.");
   return readable.some((result) => Boolean(result.value));
 }
