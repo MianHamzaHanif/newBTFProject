@@ -7,15 +7,6 @@ import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 
-// These users must use their designated withdrawal route; never render the
-// V1 withdrawal panel for them. All other users can see it only when they
-// are actually registered in V1.
-const V1_WITHDRAWAL_HIDDEN_USERS = new Set([
-  "0x029FE1A6a6D4dD7ef8537701ab6530a2d64a87FD",
-  "0xd9EEdcB4f9E1652dA9569A0a97F2A083b51663a1",
-  "0xCFAe3b54B5e03c876748153Fd286c99768dd0A49",
-  "0x7fDcCf72eEcda00125D240Ce4f1F788a1045DAf4",
-].map((address) => address.toLowerCase()));
 const V1_MIN_WITHDRAWAL = 10n ** 19n; // 10 USDT, token has 18 decimals
 const V1_WITHDRAWAL_CAP_BP = 90n;
 
@@ -98,11 +89,6 @@ export default function V2Withdrawal() {
       const referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_REFERRAL_ABI, provider);
       const v1User = await referral.users(user);
       if (!Boolean(v1User?.exists ?? v1User?.[8])) {
-        setCanWithdrawV1(false);
-        setV1Overview(null);
-        return;
-      }
-      if (V1_WITHDRAWAL_HIDDEN_USERS.has(user.toLowerCase())) {
         setCanWithdrawV1(false);
         setV1Overview(null);
         return;

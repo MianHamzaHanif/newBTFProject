@@ -9,13 +9,6 @@ import { canAccessMigration } from "../blockchain/migrationAccess";
 import { V1_MAINNET } from "../blockchain/v1MainnetConfig";
 import user from "/dashboardimg/user.png";
 
-const V1_WITHDRAWAL_HIDDEN_USERS = new Set([
-  "0x029FE1A6a6D4dD7ef8537701ab6530a2d64a87FD",
-  "0xd9EEdcB4f9E1652dA9569A0a97F2A083b51663a1",
-  "0xCFAe3b54B5e03c876748153Fd286c99768dd0A49",
-  "0x7fDcCf72eEcda00125D240Ce4f1F788a1045DAf4",
-].map((address) => address.toLowerCase()));
-
 const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -359,7 +352,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
             {activeDropdown === "withdrawal" && (
               <div className="dropdown open withdrawal-dropdown">
-                {hasV1Registration && !V1_WITHDRAWAL_HIDDEN_USERS.has(walletAddress.toLowerCase()) && <NavLink
+                {hasV1Registration && <NavLink
                   to="/withdrawal/v1"
                   className="nav"
                   onClick={handleNavItemClick}

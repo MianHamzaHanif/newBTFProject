@@ -1,6 +1,5 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CONTRACT_CONFIG } from '../../../data/ecosystem';
 
 export const Hero: React.FC = () => {
   const navigate = useNavigate();
@@ -38,43 +37,6 @@ export const Hero: React.FC = () => {
               Explore Compensation Plan
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M7 13l5 5 5-5M7 6l5 5 5-5" />
-              </svg>
-            </a>
-          </div>
-
-          {/* Verified Contract Callout Pill */}
-          <div className="hero-contract-pill">
-            <div className="hero-contract-meta">
-              <div style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: 'var(--accent-emerald)',
-                boxShadow: '0 1px 4px rgba(16, 185, 129, 0.4)',
-                flexShrink: 0,
-                marginTop: '3px',
-              }} />
-              <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', lineHeight: 1.2 }}>
-                  Verified Smart Contract on BscScan
-                </span>
-                <span className="hero-contract-addr" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
-                  {CONTRACT_CONFIG.address}
-                </span>
-              </div>
-            </div>
-            <a
-              href={CONTRACT_CONFIG.explorerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Verify contract on BscScan (opens in new tab)"
-              className="hero-verify-btn"
-            >
-              Verify on BscScan
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
               </svg>
             </a>
           </div>
