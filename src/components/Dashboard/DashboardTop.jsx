@@ -731,6 +731,25 @@ const DashboardTop = () => {
     }
   };
 
+  // Do not use the public dashboard RPC to wait between the USDT approval
+  // and Buy wallet prompts. On some mobile wallets that RPC sees the
+  // approval late (or misses its polling response), which leaves the Buy
+  // button stuck on "Processing" although the approval already succeeded.
+  // MetaMask's own RPC is the authority that submitted the transaction, so
+  // use it for this short, one-block confirmation step.
+  const waitForWalletReceipt = async (transactionHash, timeoutMs = 90_000) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const receipt = await window.ethereum.request({
+        method: "eth_getTransactionReceipt",
+        params: [transactionHash],
+      });
+      if (receipt) return receipt;
+      await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+    }
+    return null;
+  };
+
   const handleBuyPackage = async () => {
     if (!window.ethereum) {
       setBuyStatus("MetaMask not found.");
@@ -822,13 +841,17 @@ const DashboardTop = () => {
             data: tokenInterface.encodeFunctionData("approve", [PackageManagerAddress, directPackageAmount]),
           }],
         });
-        const approveReceipt = await registrationProvider
-          .waitForTransaction(approveHash, 1, 180000)
-          .catch(() => null);
-        if (!approveReceipt || approveReceipt.status !== 1) {
+        setBuyStatus("Waiting for USDT approval confirmation...");
+        const approveReceipt = await waitForWalletReceipt(approveHash);
+        if (!approveReceipt || Number(approveReceipt.status) !== 1) {
           setBuyStatus("USDT approval is pending or failed. Check wallet Activity, then try Buy again.");
           return;
         }
+        // Let the status render before asking MetaMask for the second
+        // signature. This avoids mobile MetaMask swallowing the Buy popup
+        // immediately after the approval popup closes.
+        setBuyStatus("USDT approved. Opening Buy confirmation in your wallet...");
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
       }
 
       // No gas field is sent; MetaMask estimates and sets the gas limit itself.
@@ -842,10 +865,8 @@ const DashboardTop = () => {
             data: directInterface.encodeFunctionData("buyPackage", [directPackageAmount]),
         }],
       });
-      const buyReceipt = await registrationProvider
-        .waitForTransaction(txHash, 1, 180000)
-        .catch(() => null);
-      if (!buyReceipt || buyReceipt.status !== 1) {
+      const buyReceipt = await waitForWalletReceipt(txHash);
+      if (!buyReceipt || Number(buyReceipt.status) !== 1) {
         setBuyStatus("Buy transaction is pending or failed. Check wallet Activity, then try Buy again.");
         return;
       }

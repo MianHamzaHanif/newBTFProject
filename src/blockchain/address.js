@@ -18,7 +18,9 @@ export const V2LedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V2_LED
 export const V2FlushLedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V2_FLUSH_LEDGER_ADDRESS, "0xc23CE8Ab0B04f7876aeC33bA29F162b09e3Ff3B3");
 // Manual import is intentionally disabled: Mainnet uses verified V1 readers.
 export const V2ManualLegacyImporterAddress = configuredAddress(import.meta.env.VITE_BTF_V2_MANUAL_LEGACY_IMPORTER_ADDRESS);
-export const V2VerifiedLegacyImporterAddress = configuredAddress(import.meta.env.VITE_BTF_V2_VERIFIED_LEGACY_IMPORTER_ADDRESS, "0x5494319E5de5B290BeA6648CB879fab6235F2D45");
+// Must always match `PackageManager.legacyImporter()`. The Manager accepts
+// legacy package/Level-ROI calls only from this contract.
+export const V2VerifiedLegacyImporterAddress = configuredAddress(import.meta.env.VITE_BTF_V2_VERIFIED_LEGACY_IMPORTER_ADDRESS, "0xEd5FBf1c7dbc56B66f6D09B05CD6049E2659D8a8");
 export const V2VerifiedLegacyRankImporterAddress = configuredAddress(import.meta.env.VITE_BTF_V2_VERIFIED_LEGACY_RANK_IMPORTER_ADDRESS, "0xc1Ea0Ee60EECfE840A5b39d4881807331777E162");
 export const V2ManualLegacyLevelBridgeAddress = configuredAddress(import.meta.env.VITE_BTF_V2_MANUAL_LEGACY_LEVEL_BRIDGE_ADDRESS, "0xC66Bc2e4dbf27Bb6E04291Fa422a7FB41b24e54E");
 export const V2LegacyRankCheckpointAddress = configuredAddress(import.meta.env.VITE_BTF_V2_LEGACY_RANK_CHECKPOINT_ADDRESS, "0x162d392EC1C2A2eC1e7379b8b50Bf196aC9361BE");

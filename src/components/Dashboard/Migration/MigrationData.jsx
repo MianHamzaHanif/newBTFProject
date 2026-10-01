@@ -4,7 +4,7 @@ import { getReadWalletAddress } from "../../../blockchain/readProvider";
 import { canAccessMigration } from "../../../blockchain/migrationAccess";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
-import { ReferralNetworkAddress, V2ManualLegacyImporterAddress, V2VerifiedLegacyImporterAddress, V2VerifiedLegacyRankImporterAddress, V2ManualLegacyLevelBridgeAddress } from "../../../blockchain/address";
+import { ReferralNetworkAddress, PackageManagerAddress, V2ManualLegacyImporterAddress, V2VerifiedLegacyImporterAddress, V2VerifiedLegacyRankImporterAddress, V2ManualLegacyLevelBridgeAddress } from "../../../blockchain/address";
 import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import "./MigrationData.css";
 import "../styles/style.css";
@@ -28,6 +28,9 @@ const VERIFIED_IMPORTER_ABI = [
   "function importPendingLevelRoiFromV1(address user,uint256[15] amounts)"
 ];
 const VERIFIED_RANK_IMPORTER_ABI = ["function importVerifiedRanks(address user)"];
+const MANAGER_LEGACY_RECOVERY_ABI = [
+  "function setLegacyPendingLevelRoiBatch(address user,uint256[15] amounts)",
+];
 const V1_RANK_MANAGER_ABI = [
   "function powerIncomeModule() view returns(address)",
   "function rewardIncomeModule() view returns(address)",
@@ -65,6 +68,7 @@ const V1_STRUCTURE_READER_ABI = [
 const V2_STRUCTURE_MIGRATION_ABI = [
   "function migrateUser(address user)",
   "function migrated(address) view returns(bool)",
+  "function legacyLevelSeeded(address) view returns(bool)",
   "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
   "function isMigrationAuthority(address) view returns(bool)",
 ];
@@ -145,6 +149,9 @@ export default function MigrationData() {
   const [levelBusiness, setLevelBusiness] = useState(Array(15).fill("0"));
   const [refreshingLevelBusiness, setRefreshingLevelBusiness] = useState(false);
   const [levelBusinessRefreshError, setLevelBusinessRefreshError] = useState("");
+  // Read this independently of the operator action.  A legacy Level
+  // snapshot is immutable and a second seed always reverts on-chain.
+  const [legacyLevelSeeded, setLegacyLevelSeeded] = useState(null);
   const [pendingLevelRoi, setPendingLevelRoi] = useState(Array(15).fill("0"));
   const [openV1Levels, setOpenV1Levels] = useState(Array(15).fill(false));
   const [refreshingPendingLevelRoi, setRefreshingPendingLevelRoi] = useState(false);
@@ -173,6 +180,27 @@ export default function MigrationData() {
     // Keep the beneficiary field clean before any V1 refresh/import check.
     [field]: field === "user" ? normalizeWalletAddress(value) : value,
   }));
+
+  useEffect(() => {
+    let cancelled = false;
+    const user = normalizeWalletAddress(values.user);
+    if (!ethers.isAddress(user)) {
+      setLegacyLevelSeeded(null);
+      return () => { cancelled = true; };
+    }
+
+    const registry = new ethers.Contract(
+      ReferralNetworkAddress,
+      V2_STRUCTURE_MIGRATION_ABI,
+      createV1ReadProvider(),
+    );
+    registry.legacyLevelSeeded(user)
+      .then((seeded) => { if (!cancelled) setLegacyLevelSeeded(seeded); })
+      // The action itself still performs an authoritative preflight.  Keep
+      // the button usable if a public read endpoint is temporarily offline.
+      .catch(() => { if (!cancelled) setLegacyLevelSeeded(null); });
+    return () => { cancelled = true; };
+  }, [values.user]);
   const verifyUser = async (provider, user = resolvedWalletAddress(values.user)) => {
     const registryUser = await new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, provider).users(user);
     if (!Boolean(registryUser?.exists ?? registryUser?.[8])) throw new Error("Migrate this user's V2 structure first.");
@@ -185,7 +213,7 @@ export default function MigrationData() {
     const contract = new ethers.Contract(address, abi, signer);
     const isOperator = await contract.migrationOperator(caller);
     if (!isOperator) throw new Error("Connected wallet is not authorised by the V2 Registry/DAO for migration.");
-    return { contract, provider: signer.provider };
+    return { contract, provider: signer.provider, caller };
   };
 
   const authorisedVerifiedImporter = async () => {
@@ -430,10 +458,29 @@ export default function MigrationData() {
       const amounts = levelBusiness.map((amount) => ethers.parseUnits(amount || "0", 18));
       setImporting(true);
       setMessage("Checking level-business migration authority...");
-      const { contract: bridge, provider } = await authorisedContract(V2ManualLegacyLevelBridgeAddress, LEVEL_BRIDGE_ABI);
+      const { contract: bridge, provider, caller } = await authorisedContract(V2ManualLegacyLevelBridgeAddress, LEVEL_BRIDGE_ABI);
       await verifyUser(provider, beneficiary);
-      const tx = await bridge.seedVerifiedLevels(beneficiary, amounts);
+      const registry = new ethers.Contract(ReferralNetworkAddress, V2_STRUCTURE_MIGRATION_ABI, provider);
+      if (await registry.legacyLevelSeeded(beneficiary)) {
+        throw new Error("Level business is already seeded for this user. Do not call it again.");
+      }
+
+      // Estimate with the public Mainnet reader first. This avoids injected
+      // wallet gas-estimation failures that leave MetaMask without a visible
+      // confirmation popup. MetaMask receives only the prepared transaction.
+      const readBridge = new ethers.Contract(
+        V2ManualLegacyLevelBridgeAddress,
+        LEVEL_BRIDGE_ABI,
+        createV1ReadProvider(),
+      );
+      const estimatedGas = await readBridge.seedVerifiedLevels.estimateGas(
+        beneficiary,
+        amounts,
+        { from: caller },
+      );
+      const gasLimit = (estimatedGas * 125n) / 100n + 25_000n;
       setMessage("Confirm the V2 Level Business transaction in your wallet.");
+      const tx = await bridge.seedVerifiedLevels(beneficiary, amounts, { gasLimit });
       await tx.wait();
       setMessage("Level active business seeded successfully.");
       window.dispatchEvent(new Event("btf:v2-data-changed"));
@@ -549,19 +596,18 @@ export default function MigrationData() {
     try {
       if (!window.ethereum) throw new Error("MetaMask or Trust Wallet is not available.");
       const beneficiary = resolvedWalletAddress(values.user);
-      if (!verifiedPackageImport) throw new Error("Verified V1 Package Importer address is not configured for this deployment.");
       if (!pendingLevelRoiRefreshed) throw new Error("Pehle Refresh V1 Pending Level ROI karein.");
       setImporting(true);
-      setMessage("Preparing the UI-calculated pending Level ROI array for batch import...");
-      const { contract: importer, provider } = await authorisedVerifiedImporter();
+      setMessage("Checking V2 migration authority and preparing the verified Level ROI correction...");
+      const { provider } = await authorisedVerifiedImporter();
       await verifyUser(provider, beneficiary);
-      if (!await importer.imported(beneficiary)) throw new Error("Pehle verified V1 package import karein.");
-      if (await importer.legacyLevelRoiImported(beneficiary)) throw new Error("V1 pending Level ROI is already imported for this user.");
       const expectedAmounts = pendingLevelRoi.map((amount) => ethers.parseUnits(amount || "0", 18));
-      const tx = await importer.importPendingLevelRoiFromV1(beneficiary, expectedAmounts);
-      setMessage("Confirm the Pending Level ROI batch import transaction in your wallet.");
+      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+      const manager = new ethers.Contract(PackageManagerAddress, MANAGER_LEGACY_RECOVERY_ABI, signer);
+      setMessage("Confirm the Pending Level ROI batch correction transaction in your wallet.");
+      const tx = await manager.setLegacyPendingLevelRoiBatch(beneficiary, expectedAmounts);
       await tx.wait();
-      setMessage("All currently open V1 levels' pending ROI imported successfully.");
+      setMessage("Verified V1 Pending Level ROI saved successfully. Repeating this action later replaces only the legacy snapshot; it never duplicates V2 ROI.");
       window.dispatchEvent(new Event("btf:v2-data-changed"));
     } catch (error) {
       setMessage(error?.shortMessage || error?.reason || error?.message || "Pending Level ROI batch import failed.");
@@ -757,7 +803,8 @@ export default function MigrationData() {
       <p className="migration-panel-note">Enter only active V1 package business for every level. This is a one-time seed and requires the package import first.</p>
       <div className="migration-level-refresh"><button className="migration-secondary-action" onClick={refreshV1LevelBusiness} disabled={refreshingLevelBusiness || importing}>{refreshingLevelBusiness ? "Refreshing V1 Business..." : "Refresh V1 Active Business"}</button>{levelBusinessRefreshError && <span>{levelBusinessRefreshError}</span>}</div>
       <div className="migration-level-grid">{levelBusiness.map((amount, index) => <Field key={index} label={`Level ${index + 1} Business`} suffix="USDT" value={amount} onChange={(value) => setLevelBusiness((current) => current.map((entry, position) => position === index ? value : entry))} placeholder="0" />)}</div>
-      <div className="migration-actions"><button className="migration-primary-button" onClick={seedLevelBusiness} disabled={importing}>{importing ? "Processing..." : "Call V2 Level Business Seed"}</button></div>
+      {legacyLevelSeeded === true && <p className="migration-panel-note">This user's V2 Level Business was already seeded. Do not submit this one-time call again.</p>}
+      <div className="migration-actions"><button type="button" className="migration-primary-button" onClick={seedLevelBusiness} disabled={importing || legacyLevelSeeded === true}>{importing ? "Processing..." : legacyLevelSeeded === true ? "V2 Level Business Already Seeded" : "Call V2 Level Business Seed"}</button></div>
     </div>
     <div className="migration-level-panel">
       <div className="migration-section-title"><span>4</span> Pending Level ROI</div>
