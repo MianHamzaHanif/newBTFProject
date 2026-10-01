@@ -6,9 +6,15 @@ import { ReferralNetworkAddress } from "../blockchain/address";
 import { BSC_MAINNET } from "../blockchain/bscMainnetConfig";
 import { getReadWalletAddress } from "../blockchain/readProvider";
 import { canAccessMigration } from "../blockchain/migrationAccess";
-import { hasImportedLegacyPackage } from "../blockchain/legacyPackageImportState";
 import { V1_MAINNET } from "../blockchain/v1MainnetConfig";
 import user from "/dashboardimg/user.png";
+
+const V1_WITHDRAWAL_HIDDEN_USERS = new Set([
+  "0x029FE1A6a6D4dD7ef8537701ab6530a2d64a87FD",
+  "0xd9EEdcB4f9E1652dA9569A0a97F2A083b51663a1",
+  "0xCFAe3b54B5e03c876748153Fd286c99768dd0A49",
+  "0x7fDcCf72eEcda00125D240Ce4f1F788a1045DAf4",
+].map((address) => address.toLowerCase()));
 
 const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const navigate = useNavigate();
@@ -19,7 +25,6 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [canViewMigration, setCanViewMigration] = useState(false);
   const [hasV1Registration, setHasV1Registration] = useState(false);
-  const [hasImportedV1Package, setHasImportedV1Package] = useState(false);
   const V1_USER_ABI = ["function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)"];
 
   const formatWalletAddress = (address) => {
@@ -48,7 +53,6 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
         setCanViewMigration(false);
         setHasV1Registration(false);
-        setHasImportedV1Package(false);
         return;
       }
 
@@ -69,15 +73,10 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       setCanViewMigration(await canAccessMigration(address));
       try {
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
-        const [v1User, importedPackage] = await Promise.all([
-          v1.users(address),
-          hasImportedLegacyPackage(address),
-        ]);
+        const v1User = await v1.users(address);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
-        setHasImportedV1Package(importedPackage);
       } catch {
         setHasV1Registration(false);
-        setHasImportedV1Package(true);
       }
     };
 
@@ -89,7 +88,6 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
         setCanViewMigration(false);
         setHasV1Registration(false);
-        setHasImportedV1Package(false);
         return;
       }
 
@@ -110,15 +108,10 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       setCanViewMigration(await canAccessMigration(address));
       try {
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
-        const [v1User, importedPackage] = await Promise.all([
-          v1.users(address),
-          hasImportedLegacyPackage(address),
-        ]);
+        const v1User = await v1.users(address);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
-        setHasImportedV1Package(importedPackage);
       } catch {
         setHasV1Registration(false);
-        setHasImportedV1Package(true);
       }
     };
 
@@ -366,7 +359,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
             {activeDropdown === "withdrawal" && (
               <div className="dropdown open withdrawal-dropdown">
-                {hasV1Registration && !hasImportedV1Package && <NavLink
+                {hasV1Registration && !V1_WITHDRAWAL_HIDDEN_USERS.has(walletAddress.toLowerCase()) && <NavLink
                   to="/withdrawal/v1"
                   className="nav"
                   onClick={handleNavItemClick}

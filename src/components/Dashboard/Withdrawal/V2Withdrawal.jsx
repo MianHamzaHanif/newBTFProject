@@ -16,6 +16,8 @@ const V1_WITHDRAWAL_HIDDEN_USERS = new Set([
   "0xCFAe3b54B5e03c876748153Fd286c99768dd0A49",
   "0x7fDcCf72eEcda00125D240Ce4f1F788a1045DAf4",
 ].map((address) => address.toLowerCase()));
+const V1_MIN_WITHDRAWAL = 10n ** 19n; // 10 USDT, token has 18 decimals
+const V1_WITHDRAWAL_CAP_BP = 90n;
 
 const formatUsdt = (value) => {
   try {
@@ -189,6 +191,14 @@ export default function V2Withdrawal() {
     location.pathname === "/withdrawal/v1" || location.hash === "#withdraw-v1"
   );
   const showV2 = !showV1;
+  const v1TotalClaimed = BigInt(v1Overview?.directClaimed ?? 0n)
+    + BigInt(v1Overview?.selfClaimed ?? 0n)
+    + BigInt(v1Overview?.levelClaimed ?? 0n)
+    + BigInt(v1Overview?.powerClaimed ?? 0n)
+    + BigInt(v1Overview?.rewardClaimed ?? 0n);
+  const v1IncomeLimit = BigInt(v1Overview?.incomeLimit ?? 0n);
+  const v1NinetyPercentLimit = (v1IncomeLimit * V1_WITHDRAWAL_CAP_BP) / 100n;
+  const v1NinetyPercentReached = v1IncomeLimit > 0n && v1TotalClaimed >= v1NinetyPercentLimit;
 
   const withdraw = async () => {
     if (!window.ethereum) {
@@ -222,6 +232,14 @@ export default function V2Withdrawal() {
   };
 
   const withdrawV1 = async () => {
+    if (v1NinetyPercentReached) {
+      setV1Message("Your 90% V1 income limit is reached. Buy a new package to withdraw the next amount.");
+      return;
+    }
+    if (BigInt(v1Overview?.totalClaimable ?? 0n) < V1_MIN_WITHDRAWAL) {
+      setV1Message("Minimum V1 withdrawal is 10 USDT.");
+      return;
+    }
     if (!window.ethereum) {
       setV1Message("MetaMask or Trust Wallet is not available.");
       return;
@@ -270,9 +288,12 @@ export default function V2Withdrawal() {
           <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimable Income</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.totalClaimable)} USDT</h4></div>
         </div>
         <div className="withdraw-action-wrap">
-          <button className="custom-button withdraw-btn" onClick={withdrawV1} disabled={v1Loading || v1Withdrawing}>
+          <button className="custom-button withdraw-btn" onClick={withdrawV1} disabled={v1Loading || v1Withdrawing || v1NinetyPercentReached || BigInt(v1Overview?.totalClaimable ?? 0n) < V1_MIN_WITHDRAWAL}>
             {v1Withdrawing ? "Withdrawing..." : "Withdraw V1"}
           </button>
+          {v1NinetyPercentReached
+            ? <p className="team-loading withdraw-status">Your 90% V1 income limit is reached. Buy a new package to withdraw the next amount.</p>
+            : <p className="team-loading withdraw-status">Minimum V1 withdrawal: 10 USDT</p>}
         </div>
       </div>}
 
