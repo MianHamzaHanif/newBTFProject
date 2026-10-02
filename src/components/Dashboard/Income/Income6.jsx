@@ -188,7 +188,6 @@ export const Income6 = () => {
       <div className="withdrawal-card"><p className="withdrawal-card-title">Reward Income Claimable</p><h4 className="withdrawal-card-value">{cards.rewardIncomeClaimable}</h4></div>
     </div>
     <div className="withdrawal-grid" style={{ marginTop: "12px" }}>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Next Reward Level</p><h4 className="withdrawal-card-value">{cards.nextRewardIndex}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimed Amount</p><h4 className="withdrawal-card-value">{cards.totalClaimedAmount}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimable Amount</p><h4 className="withdrawal-card-value">{cards.totalClaimableAmount}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Next Claimable: {cards.nextClaimableIndex} | Unlocked: {cards.unlockedCount}</p><h4 className="withdrawal-card-value">{cards.rewardIncomeClaimable}</h4></div>
