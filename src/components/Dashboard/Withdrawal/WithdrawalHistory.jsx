@@ -66,6 +66,7 @@ export const WithdrawalHistory = () => {
 
       const legacyRows = v1Records.map((record) => {
         const total = BigInt(record.usdAmount ?? record[6] ?? 0n);
+        const timestamp = BigInt(record.timestamp ?? record[7] ?? 0n);
         return {
           source: "V1 (Legacy)",
           direct: formatAmount(record.directAmount ?? record[1]),
@@ -74,12 +75,14 @@ export const WithdrawalHistory = () => {
           power: formatAmount(record.powerAmount ?? record[4]),
           reward: formatAmount(record.rewardAmount ?? record[5]),
           total: formatAmount(total),
-          time: formatTime(record.timestamp ?? record[7]),
+          time: formatTime(timestamp),
           rawTotal: total,
+          rawTimestamp: timestamp,
         };
       }).filter((row) => row.rawTotal > 0n);
       const newRows = v2Records.map((record) => {
         const total = BigInt(record.amount ?? record[0] ?? 0n);
+        const timestamp = BigInt(record.timestamp ?? record[1] ?? 0n);
         return {
           source: "V2 (New)",
           direct: "-",
@@ -88,14 +91,20 @@ export const WithdrawalHistory = () => {
           power: "-",
           reward: "-",
           total: formatAmount(total),
-          time: formatTime(record.timestamp ?? record[1]),
+          time: formatTime(timestamp),
           rawTotal: total,
+          rawTimestamp: timestamp,
         };
       }).filter((row) => row.rawTotal > 0n);
 
       setV1Total(formatAmount(legacyRows.reduce((sum, row) => sum + row.rawTotal, 0n)));
       setV2Total(formatAmount(newRows.reduce((sum, row) => sum + row.rawTotal, 0n)));
-      setRows([...legacyRows, ...newRows].map(({ rawTotal, ...row }, index) => ({ ...row, sno: index + 1 })));
+      // V1 and V2 histories use independent indexes. Merge them first, then
+      // use the actual on-chain timestamp so the newest withdrawal is always
+      // at the top regardless of which version created it.
+      const chronologicalRows = [...legacyRows, ...newRows]
+        .sort((a, b) => (a.rawTimestamp === b.rawTimestamp ? 0 : a.rawTimestamp > b.rawTimestamp ? -1 : 1));
+      setRows(chronologicalRows.map(({ rawTotal, rawTimestamp, ...row }, index) => ({ ...row, sno: index + 1 })));
     } catch (error) {
       setRows([]);
       setV1Total("0.0000");
