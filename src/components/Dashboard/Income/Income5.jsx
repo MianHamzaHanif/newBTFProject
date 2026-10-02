@@ -98,16 +98,12 @@ export const Income5 = () => {
       const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
       const v1Achieved = v1RewardTimes.reduce((highest, achievedAt, offset) => BigInt(achievedAt) > 0n ? offset + 1 : highest, 0);
-      const nextIndex = achieved < 12 ? achieved + 1 : 0;
-      const [qualifiedBusiness, requiredBusiness] = nextIndex
-        ? await Promise.all([
-          registry.rewardQualifiedBusiness(user, nextIndex),
-          registry.rewardThreshold(nextIndex),
-        ])
-        : [0n, 0n];
-
-      const remaining = requiredBusiness > qualifiedBusiness
-        ? requiredBusiness - qualifiedBusiness
+      // Continue from the highest reward already achieved in either V1 or
+      // V2; the V2 target business is then previewed using the V2 formula.
+      const effectiveAchieved = Math.max(achieved, v1Achieved);
+      const nextIndex = effectiveAchieved < 12 ? effectiveAchieved + 1 : 0;
+      const requiredBusiness = nextIndex
+        ? await registry.rewardThreshold(nextIndex)
         : 0n;
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
       const [v1DirectResult, v2DirectResult] = await Promise.allSettled([
@@ -126,27 +122,40 @@ export const Income5 = () => {
         const prior = directMap.get(address.toLowerCase());
         directMap.set(address.toLowerCase(), { address, inV1: prior?.inV1 ?? false, inV2: true });
       }
+      const legacyLegsImported = await registry.legacyLegsReady(user);
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage] = await Promise.all([
+        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated] = await Promise.all([
           member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
           member.inV2 ? registry.users(member.address).catch(() => null) : null,
           combinedPackageBusiness(member.address, v1Manager, v2Manager).catch(() => 0n),
           member.inV2 ? registry.hasQualifiedPackage(member.address).catch(() => false) : false,
           member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
           member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
+          member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
+          member.inV2 ? registry.legacyLegBusiness(user, member.address).catch(() => 0n) : 0n,
+          member.inV2 ? registry.migrated(member.address).catch(() => false) : false,
         ]);
         const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
         const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
-        const counted = nextIndex && eligible ? (legBusiness > capPerLeg ? capPerLeg : legBusiness) : 0n;
-        return { sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package" };
+        const v1Baseline = directMigrated && v1User
+          ? BigInt(v1User.totalTeamDeposit ?? v1User[4] ?? 0n)
+            + BigInt(v1User.selfDeposit ?? v1User[5] ?? 0n)
+          : 0n;
+        const v2FormulaBusiness = BigInt(v2LegBusiness)
+          + (legacyLegsImported || BigInt(importedLegacyBusiness) > 0n ? 0n : v1Baseline);
+        const counted = nextIndex && member.inV2 && eligible
+          ? (v2FormulaBusiness > capPerLeg ? capPerLeg : v2FormulaBusiness)
+          : 0n;
+        return { sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), countedRaw: counted, status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package" };
       }));
+      const qualifiedBusiness = directRows.reduce((total, row) => total + row.countedRaw, 0n);
+      const remaining = requiredBusiness > qualifiedBusiness
+        ? requiredBusiness - qualifiedBusiness
+        : 0n;
 
       setSummary({
         achieved,
-        // Do not show a legacy R1 separately if V2 already has R1. V1 is a
-        // fallback or a distinct higher/lower historical reward record.
-        v1Achieved: v1Achieved && v1Achieved !== achieved ? v1Achieved : 0,
         nextIndex,
         qualifiedBusiness,
         requiredBusiness,
@@ -231,7 +240,6 @@ export const Income5 = () => {
 
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achieved ? `R${summary.achieved}` : summary?.v1Achieved ? `R${summary.v1Achieved}` : "0"}</h4></div>
-        {summary?.v1Achieved ? <div className="withdrawal-card"><p className="withdrawal-card-title">V1 Reward (Legacy)</p><h4 className="withdrawal-card-value">R{summary.v1Achieved}</h4></div> : null}
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Reward</p><h4 className="withdrawal-card-value">{summary?.nextIndex ? `R${summary.nextIndex}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Reward)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.qualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>
