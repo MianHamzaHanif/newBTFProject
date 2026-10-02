@@ -23,11 +23,22 @@ const V1_TEAM_READER_ABI = [
 ];
 const TEAM_READER_INTERFACE = new ethers.Interface(V1_TEAM_READER_ABI);
 
+// The production marketing domain is served by Hostinger and has no serverless
+// `/api` directory. Team list reads therefore use the deployed Vercel
+// read-only proxy there; on Vercel itself keep calls same-origin.
+const getTeamRpcUrl = () => {
+  if (typeof window === "undefined") return "/api/bsc-rpc";
+  if (window.location.hostname === "btf.marketing") {
+    return "https://new-btf-project.vercel.app/api/bsc-rpc";
+  }
+  return `${window.location.origin}/api/bsc-rpc`;
+};
+
 // The Vercel proxy has already been verified with these exact calls for the
 // affected wallet. Use plain fetch for the critical level list, avoiding the
 // mobile-browser ethers FallbackProvider layer that was failing both lists.
 const readTeamViaProxy = async (contractAddress, method, args) => {
-  const response = await fetch(`${window.location.origin}/api/bsc-rpc`, {
+  const response = await fetch(getTeamRpcUrl(), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

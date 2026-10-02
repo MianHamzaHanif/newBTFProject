@@ -8,6 +8,10 @@ import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 
 const V1_MIN_WITHDRAWAL = 10n ** 19n; // 10 USDT, token has 18 decimals
+// UI-only policy: V2 withdrawals are enabled from 10 USDT. Keep a larger
+// on-chain minimum if the Ledger is configured with one, but never lower the
+// UI guard below 10 USDT.
+const V2_UI_MIN_WITHDRAWAL = 10n ** 19n;
 const V1_WITHDRAWAL_CAP_BP = 90n;
 
 const formatUsdt = (value) => {
@@ -67,7 +71,7 @@ export default function V2Withdrawal() {
   const location = useLocation();
   const [pending, setPending] = useState(0n);
   const [totalWithdrawn, setTotalWithdrawn] = useState(0n);
-  const [minimumWithdraw, setMinimumWithdraw] = useState(10n ** 19n);
+  const [minimumWithdraw, setMinimumWithdraw] = useState(V2_UI_MIN_WITHDRAWAL);
   const [loading, setLoading] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [message, setMessage] = useState("");
@@ -149,11 +153,15 @@ export default function V2Withdrawal() {
         .catch(() => 0n);
 
       setPending(balance);
-      setMinimumWithdraw(minimum);
+      setMinimumWithdraw(
+        BigInt(minimum) > V2_UI_MIN_WITHDRAWAL
+          ? BigInt(minimum)
+          : V2_UI_MIN_WITHDRAWAL,
+      );
       setTotalWithdrawn(withdrawn);
     } catch (error) {
       setPending(0n);
-      setMinimumWithdraw(10n ** 19n);
+      setMinimumWithdraw(V2_UI_MIN_WITHDRAWAL);
       setTotalWithdrawn(0n);
       setMessage(error?.shortMessage || error?.message || "Could not load V2 withdrawal data.");
     } finally {
