@@ -59,6 +59,7 @@ export const Income4 = () => {
   const [loading, setLoading] = useState(false);
   const [legacyPower, setLegacyPower] = useState(null);
   const [v1Power, setV1Power] = useState(null);
+  const [nextPowerProgress, setNextPowerProgress] = useState({ level: 0, required: 0n, qualified: 0n });
 
   const loadPowerDetails = useCallback(async () => {
     setLoading(true);
@@ -135,6 +136,21 @@ export const Income4 = () => {
         v1PowerModule.rawClaimable(user),
         v1Manager.totalPowerIncomeClaimed(user),
       ]);
+      // The lens only knows the Registry's V2 rank. A migrated V1/checkpoint
+      // rank can be higher, so compute the next target from the highest rank
+      // shown to the user rather than incorrectly resetting the UI to P1.
+      const effectiveAchievedLevel = Math.max(
+        Number(powerDetails.achievedLevel ?? 0n),
+        legacySchedule.set ? Number(legacySchedule.level ?? 0n) : 0,
+        Number(v1Level ?? 0n),
+      );
+      const nextPowerLevel = effectiveAchievedLevel < 9 ? effectiveAchievedLevel + 1 : 0;
+      const [nextThreshold, nextQualified] = nextPowerLevel
+        ? await Promise.all([
+            registry.powerThreshold(nextPowerLevel),
+            registry.powerQualifiedBusiness(user, nextPowerLevel),
+          ])
+        : [0n, 0n];
       setDetails(powerDetails);
       setLegacyPower(legacySchedule.set ? {
         originalAchievedAt: legacySchedule.originalAchievedAt,
@@ -151,6 +167,13 @@ export const Income4 = () => {
         claimableAmount: v1Claimable,
         totalClaimed: v1TotalClaimed,
       } : null);
+      setNextPowerProgress({
+        level: nextPowerLevel,
+        required: BigInt(nextThreshold) > BigInt(nextQualified)
+          ? BigInt(nextThreshold) - BigInt(nextQualified)
+          : 0n,
+        qualified: nextQualified,
+      });
       setLevelDetails(levels);
       setPowerTiming({ now: BigInt(latestBlock?.timestamp ?? 0), roiDay: BigInt(roiDay ?? 120n) });
       setRegistryAchievementAt(achievedAt);
@@ -161,6 +184,7 @@ export const Income4 = () => {
       setRegistryAchievementAt(0n);
       setLegacyPower(null);
       setV1Power(null);
+      setNextPowerProgress({ level: 0, required: 0n, qualified: 0n });
       setMessage(error?.shortMessage || error?.message || "Could not load Power details");
     } finally {
       setLoading(false);
@@ -182,9 +206,9 @@ export const Income4 = () => {
   const showV1Power = Boolean(v1Power && !v2RankLevels.has(Number(v1Power.level)));
   const activeLevel = nativeActiveLevel || Number(legacyPower?.level ?? 0n) || Number(v1Power?.level ?? 0n);
   const achievedLevel = nativeAchievedLevel || Number(legacyPower?.level ?? 0n) || Number(v1Power?.level ?? 0n);
-  const nextLevel = Number(details?.nextLevel ?? 0n);
-  const qualified = formatUsdt(details?.nextQualifiedBusiness);
-  const required = formatUsdt(details?.nextRequiredBusiness);
+  const nextLevel = nextPowerProgress.level;
+  const qualified = formatUsdt(nextPowerProgress.qualified);
+  const required = formatUsdt(nextPowerProgress.required);
   const powerTime = BigInt(legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt || BigInt(v1Power?.activatedAt ?? 0n);
   const powerClaimable = BigInt(details?.claimableAmount ?? 0n)
     + BigInt(legacyPower?.claimableAmount ?? 0n)

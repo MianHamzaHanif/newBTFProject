@@ -130,6 +130,7 @@ export const MyDirect = () => {
             address,
             registeredAt: formatTime(user.registeredAt ?? user[2]),
             packageUsdt: formatUsdt(selfBusiness),
+            teamBusiness: formatUsdt(teamBusiness),
             totalTeam: (user.totalTeam ?? user[3] ?? 0n).toString(),
           };
         }, 4);
@@ -156,6 +157,7 @@ export const MyDirect = () => {
     { id: "address", label: "Wallet Address", sortable: true },
     { id: "registeredAt", label: "Register Time", sortable: true },
     { id: "packageUsdt", label: "Self Business (USDT)", sortable: true },
+    { id: "teamBusiness", label: "Team Business (V1 + V2)", sortable: true },
     { id: "totalTeam", label: "Total Team", sortable: true },
   ];
 
@@ -167,6 +169,7 @@ export const MyDirect = () => {
       <TableCell align="center">{shortAddress(row.address)}</TableCell>
       <TableCell align="center" className="team-time-cell">{row.registeredAt}</TableCell>
       <TableCell align="center">{row.packageUsdt}</TableCell>
+      <TableCell align="center">{row.teamBusiness}</TableCell>
       <TableCell align="center">{row.totalTeam}</TableCell>
     </>} />
   </div></div></div>;
