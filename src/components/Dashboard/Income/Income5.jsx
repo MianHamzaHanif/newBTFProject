@@ -155,7 +155,9 @@ export const Income5 = () => {
         : 0n;
 
       setSummary({
-        achieved,
+        // Display the highest rank already held across V1 and V2. The
+        // separate V1 card is intentionally hidden, not its rank itself.
+        achieved: effectiveAchieved,
         nextIndex,
         qualifiedBusiness,
         requiredBusiness,
