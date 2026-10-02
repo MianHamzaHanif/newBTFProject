@@ -115,7 +115,7 @@ export const MyDirect = () => {
           const previous = merged.get(address.toLowerCase());
           merged.set(address.toLowerCase(), { address, v1User: previous?.v1User ?? null, v2User: user });
         }
-        const combined = await readInBatches(Array.from(merged.values()), async ({ address, v1User, v2User }, index) => {
+        const combined = await readInBatches(Array.from(merged.values()), async ({ address, v1User, v2User }) => {
           const user = v2User ?? v1User;
           const selfBusiness = await combinedPackageTotal(address, v1Manager, v2Manager);
           // The Registry's team-business counters are separate from the
@@ -125,7 +125,6 @@ export const MyDirect = () => {
             + BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
           const source = v1User && v2User ? "V1 + V2" : v2User ? "V2" : "V1";
           return {
-            sno: index + 1,
             source,
             address,
             registeredAt: formatTime(user.registeredAt ?? user[2]),
@@ -135,9 +134,14 @@ export const MyDirect = () => {
           };
         }, 4);
 
+        // `readInBatches` restarts its callback index in every batch. Number
+        // rows only after all V1/V2 directs are merged so S. No remains
+        // globally sequential: 1, 2, 3 ... rather than repeating per batch.
+        const numberedRows = combined.map((row, index) => ({ ...row, sno: index + 1 }));
+
         if (cancelled) return;
-        setRows(combined);
-        setMessage(failures.length ? `${failures.join(". ")}. Other available directs are shown.` : combined.length ? "" : "No V1 or V2 direct user found.");
+        setRows(numberedRows);
+        setMessage(failures.length ? `${failures.join(". ")}. Other available directs are shown.` : numberedRows.length ? "" : "No V1 or V2 direct user found.");
       } catch (error) {
         if (!cancelled) {
           setRows([]);
