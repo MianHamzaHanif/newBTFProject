@@ -112,14 +112,12 @@ export const PowerIncomeWithdraw = () => {
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
       const v1Achieved = Number(await v1PowerModule.activePowerLevel(user));
       const achievedReward = Number(achievedRewardRaw);
-      const nextLevel = achieved < 9 ? achieved + 1 : 0;
+      // The next V2 target begins after the highest rank the user already
+      // holds, whether that P-level is in V2 or still shown from V1.
+      const effectivePowerLevel = Math.max(achieved, v1Achieved);
+      const nextLevel = effectivePowerLevel < 9 ? effectivePowerLevel + 1 : 0;
       const nextReward = achievedReward < 12 ? achievedReward + 1 : 0;
-      const [qualifiedBusiness, requiredBusiness] = nextLevel
-        ? await Promise.all([
-            registry.powerQualifiedBusiness(user, nextLevel),
-            registry.powerThreshold(nextLevel),
-          ])
-        : [0n, 0n];
+      const requiredBusiness = nextLevel ? await registry.powerThreshold(nextLevel) : 0n;
       const [rewardQualifiedBusiness, rewardRequiredBusiness] = nextReward
         ? await Promise.all([
             registry.rewardQualifiedBusiness(user, nextReward),
@@ -127,9 +125,6 @@ export const PowerIncomeWithdraw = () => {
           ])
         : [0n, 0n];
 
-      const remaining = requiredBusiness > qualifiedBusiness
-        ? requiredBusiness - qualifiedBusiness
-        : 0n;
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
       const [v1DirectResult, v2DirectResult] = await Promise.allSettled([
         (async () => {
@@ -149,26 +144,47 @@ export const PowerIncomeWithdraw = () => {
         const previous = directMap.get(direct.toLowerCase());
         directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
       }
+      const legacyLegsImported = await registry.legacyLegsReady(user);
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage] = await Promise.all([
+        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated] = await Promise.all([
           member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
           member.inV2 ? registry.users(member.address).catch(() => null) : null,
           combinedPackageBusiness(member.address, v1Manager, v2Manager).catch(() => 0n),
           member.inV2 ? registry.hasQualifiedPackage(member.address).catch(() => false) : false,
           member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
           member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
+          member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
+          member.inV2 ? registry.legacyLegBusiness(user, member.address).catch(() => 0n) : 0n,
+          member.inV2 ? registry.migrated(member.address).catch(() => false) : false,
         ]);
         const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
           + BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
         const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
-        const counted = nextLevel && eligible ? (legBusiness > capPerLeg ? capPerLeg : legBusiness) : 0n;
+        // This is the V2 formula shown as a read-only preview: V2's leg
+        // business plus V1's self+team baseline, capped at 40% per leg.
+        // Imported legacy legs already contain their V1 amount in V2, so do
+        // not add it again during a partial/full import.
+        const v1Baseline = directMigrated && v1User
+          ? BigInt(v1User.totalTeamDeposit ?? v1User[4] ?? 0n)
+            + BigInt(v1User.selfDeposit ?? v1User[5] ?? 0n)
+          : 0n;
+        const v2FormulaBusiness = BigInt(v2LegBusiness)
+          + (legacyLegsImported || BigInt(importedLegacyBusiness) > 0n ? 0n : v1Baseline);
+        const counted = nextLevel && member.inV2 && eligible
+          ? (v2FormulaBusiness > capPerLeg ? capPerLeg : v2FormulaBusiness)
+          : 0n;
         return {
           sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness),
           teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted),
+          countedRaw: counted,
           status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package",
         };
       }));
+      const qualifiedBusiness = directRows.reduce((total, row) => total + row.countedRaw, 0n);
+      const remaining = requiredBusiness > qualifiedBusiness
+        ? requiredBusiness - qualifiedBusiness
+        : 0n;
 
       setSummary({
         achieved,
@@ -267,7 +283,6 @@ export const PowerIncomeWithdraw = () => {
       </div>
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Power</p><h4 className="withdrawal-card-value">{summary?.achieved ? `P${summary.achieved}` : summary?.v1Achieved ? `P${summary.v1Achieved}` : "0"}</h4></div>
-        {summary?.v1Achieved ? <div className="withdrawal-card"><p className="withdrawal-card-title">V1 Power (Legacy)</p><h4 className="withdrawal-card-value">P{summary.v1Achieved}</h4></div> : null}
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Power</p><h4 className="withdrawal-card-value">{summary?.nextLevel ? `P${summary.nextLevel}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Power)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.qualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>
