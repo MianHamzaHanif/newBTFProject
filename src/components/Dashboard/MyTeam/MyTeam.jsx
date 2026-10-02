@@ -10,7 +10,7 @@ import {
   PackageManagerAddress,
   ReferralNetworkAddress,
 } from "../../../blockchain/address";
-import { createBscReadProvider, getBscReadRpcUrls, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { getReadWalletAddress } from "../../../blockchain/readProvider";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
 
@@ -21,40 +21,6 @@ const V1_TEAM_READER_ABI = [
   "function getLevelUsersLength(address upline,uint256 level) view returns(uint256)",
   "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns(address)",
 ];
-const TEAM_READER_INTERFACE = new ethers.Interface(V1_TEAM_READER_ABI);
-
-// The production marketing domain is served by Hostinger and has no serverless
-// `/api` directory. Team list reads therefore use the deployed Vercel
-// read-only proxy there; on Vercel itself keep calls same-origin.
-const getTeamRpcUrl = () => {
-  if (typeof window === "undefined") return "/api/bsc-rpc";
-  if (window.location.hostname === "btf.marketing") {
-    return "https://new-btf-project.vercel.app/api/bsc-rpc";
-  }
-  return `${window.location.origin}/api/bsc-rpc`;
-};
-
-// The Vercel proxy has already been verified with these exact calls for the
-// affected wallet. Use plain fetch for the critical level list, avoiding the
-// mobile-browser ethers FallbackProvider layer that was failing both lists.
-const readTeamViaProxy = async (contractAddress, method, args) => {
-  const response = await fetch(getTeamRpcUrl(), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0", id: `${method}-${Date.now()}-${Math.random()}`,
-      method: "eth_call",
-      params: [{
-        to: contractAddress,
-        data: TEAM_READER_INTERFACE.encodeFunctionData(method, args),
-      }, "latest"],
-    }),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.error) throw new Error(payload?.error?.message || "Team read failed");
-  return TEAM_READER_INTERFACE.decodeFunctionResult(method, payload.result)[0];
-};
-
 const createV1ReadProvider = () => {
   const makeProvider = (url) => {
     const request = new ethers.FetchRequest(url);
@@ -63,10 +29,21 @@ const createV1ReadProvider = () => {
       staticNetwork: true, batchMaxCount: 1, batchStallTime: 0,
     });
   };
-  // Team lists make several back-to-back reads. PublicNode can occasionally
-  // drop one mobile request, so V1 reads fail over to the BSC data seed.
-  const urls = [getBscReadRpcUrls()[0], V1_MAINNET.rpcUrl, "https://bsc-dataseed.bnbchain.org"]
-    .filter((url, index, all) => Boolean(url) && all.indexOf(url) === index);
+  const urls = [V1_MAINNET.rpcUrl, "https://bsc-dataseed.bnbchain.org"];
+  return new ethers.FallbackProvider(urls.map((url, index) => ({
+    provider: makeProvider(url), priority: index + 1, stallTimeout: index === 0 ? 3_000 : 1_500, weight: 1,
+  })), V1_MAINNET.chainId, { quorum: 1 });
+};
+
+const createV2ReadProvider = () => {
+  const makeProvider = (url) => {
+    const request = new ethers.FetchRequest(url);
+    request.timeout = 20_000;
+    return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {
+      staticNetwork: true, batchMaxCount: 1, batchStallTime: 0,
+    });
+  };
+  const urls = ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org"];
   return new ethers.FallbackProvider(urls.map((url, index) => ({
     provider: makeProvider(url), priority: index + 1, stallTimeout: index === 0 ? 3_000 : 1_500, weight: 1,
   })), V1_MAINNET.chainId, { quorum: 1 });
@@ -212,7 +189,7 @@ export const MyTeam = () => {
         return;
       }
 
-      const provider = createBscReadProvider();
+      const provider = createV2ReadProvider();
       const referralContract = new ethers.Contract(
         ReferralNetworkAddress,
         ReferralNetworkABI,
@@ -295,7 +272,7 @@ export const MyTeam = () => {
         setTeamReadAddress(walletAddress);
         setLoadError("");
 
-        const provider = createBscReadProvider();
+        const provider = createV2ReadProvider();
         const v2ReferralContract = new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, provider);
         const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
         const v1Provider = createV1ReadProvider();
@@ -306,38 +283,24 @@ export const MyTeam = () => {
         );
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
         const levelIndex = selectedLevel - 1;
-        const readLevelAddresses = async (registryAddress, registry) => {
+        const readLevelAddresses = async (registry) => {
           let lastError;
-          // A retry is important on mobile networks: a failed list call must
-          // not be interpreted as an empty level.
           for (let attempt = 0; attempt < 2; attempt += 1) {
             try {
-              const count = Number(await readTeamViaProxy(
-                registryAddress, "getLevelUsersLength", [walletAddress, levelIndex],
-              ));
+              const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
               return readInBatches(
                 Array.from({ length: count }, (_, index) => index),
-                (index) => readTeamViaProxy(registryAddress, "getLevelUserAt", [walletAddress, levelIndex, index]),
+                (index) => registry.getLevelUserAt(walletAddress, levelIndex, index),
               );
             } catch (error) {
               lastError = error;
             }
           }
-          // Retain the normal ethers provider only as a local-development
-          // fallback. Production list reads use the verified Vercel API path.
-          try {
-            const count = Number(await registry.getLevelUsersLength(walletAddress, levelIndex));
-            return readInBatches(
-              Array.from({ length: count }, (_, index) => index),
-              (index) => registry.getLevelUserAt(walletAddress, levelIndex),
-            );
-          } catch {
-            throw lastError || new Error("Unable to read level users.");
-          }
+          throw lastError || new Error("Unable to read level users.");
         };
         const [v1Result, v2Result] = await Promise.allSettled([
-          readLevelAddresses(V1_MAINNET.referralNetwork, v1ReferralContract),
-          readLevelAddresses(ReferralNetworkAddress, v2ReferralContract),
+          readLevelAddresses(v1ReferralContract),
+          readLevelAddresses(v2ReferralContract),
         ]);
         const v1Addresses = v1Result.status === "fulfilled" ? v1Result.value : [];
         const v2Addresses = v2Result.status === "fulfilled" ? v2Result.value : [];
