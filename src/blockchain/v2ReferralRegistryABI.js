@@ -1,5 +1,6 @@
 export default [
   "function users(address user) view returns (uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
+  "function migrated(address user) view returns (bool)",
   "function isLevelOpen(address user,uint256 level) view returns (bool)",
   "function getAchievedRewardCount(address user) view returns (uint256)",
   "function getAchievedPowerLevel(address user) view returns (uint256)",

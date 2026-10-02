@@ -41,6 +41,20 @@ const V1_POWER_MODULE_ABI = [
   "function powerClaimedCount(address) view returns(uint256)",
   "function rawClaimable(address) view returns(uint256)",
 ];
+const V1_POWER_REGISTRY_ABI = [
+  "function users(address user) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
+];
+const POWER_LEG_CAP_BPS = 4000n;
+const BASIS_POINTS = 10000n;
+
+const readInBatches = async (items, read, batchSize = 5) => {
+  const results = [];
+  for (let start = 0; start < items.length; start += batchSize) {
+    const batch = items.slice(start, start + batchSize);
+    results.push(...await Promise.all(batch.map(read)));
+  }
+  return results;
+};
 
 const card = (title, value, note = "") => (
   <div className="withdrawal-card">
@@ -129,6 +143,7 @@ export const Income4 = () => {
       // unless that same P-level already exists in V2 (V2 then wins).
       const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, provider);
       const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, provider);
+      const v1PowerRegistry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_POWER_REGISTRY_ABI, provider);
       const [v1Level, v1ActivatedAt, v1ClaimedCount, v1Claimable, v1TotalClaimed] = await Promise.all([
         v1PowerModule.activePowerLevel(user),
         v1PowerModule.powerLevelStartedAt(user),
@@ -145,12 +160,51 @@ export const Income4 = () => {
         Number(v1Level ?? 0n),
       );
       const nextPowerLevel = effectiveAchievedLevel < 9 ? effectiveAchievedLevel + 1 : 0;
-      const [nextThreshold, nextQualified] = nextPowerLevel
-        ? await Promise.all([
-            registry.powerThreshold(nextPowerLevel),
-            registry.powerQualifiedBusiness(user, nextPowerLevel),
-          ])
-        : [0n, 0n];
+      let nextThreshold = 0n;
+      let nextQualified = 0n;
+      if (nextPowerLevel) {
+        // Preview the exact V2 next-rank formula in the UI. Each V2 direct
+        // leg contributes its V2 business plus its eligible V1 baseline,
+        // then that leg is capped at 40% of the V2 threshold. No contract
+        // state is changed here; this is a read-only preview until V2's
+        // legacy-leg migration has completed on-chain.
+        const [threshold, legacyLegsImported, directCount] = await Promise.all([
+          registry.powerThreshold(nextPowerLevel),
+          registry.legacyLegsReady(user),
+          registry.getLevelUsersLength(user, 0),
+        ]);
+        nextThreshold = BigInt(threshold);
+        const directIndexes = Array.from({ length: Number(directCount) }, (_, index) => index);
+        const directs = await readInBatches(
+          directIndexes,
+          (index) => registry.getLevelUserAt(user, 0, index),
+        );
+        const perLegCap = (nextThreshold * POWER_LEG_CAP_BPS) / BASIS_POINTS;
+        const legQualified = await readInBatches(directs, async (direct) => {
+          const [v2Business, importedLegacyBusiness, isMigrated, hasEverPackage, legacyCounted, v1User] = await Promise.all([
+            registry.legBusiness(user, direct),
+            registry.legacyLegBusiness(user, direct),
+            registry.migrated(direct),
+            registry.hasEverPackage(direct),
+            registry.legacyDirectCounted(direct),
+            v1PowerRegistry.users(direct).catch(() => null),
+          ]);
+          const eligible = Boolean(hasEverPackage) || Boolean(legacyCounted);
+          if (!eligible) return 0n;
+
+          // legBusiness already includes an individually imported V1 leg.
+          // For a leg not yet imported, add its V1 snapshot locally only for
+          // this read-only preview. This also handles a partially completed
+          // legacy-leg migration without double counting.
+          const v1Business = isMigrated && v1User
+            ? BigInt(v1User.totalTeamDeposit ?? 0n) + BigInt(v1User.selfDeposit ?? 0n)
+            : 0n;
+          const combinedBusiness = BigInt(v2Business)
+            + (legacyLegsImported || BigInt(importedLegacyBusiness) > 0n ? 0n : v1Business);
+          return combinedBusiness > perLegCap ? perLegCap : combinedBusiness;
+        });
+        nextQualified = legQualified.reduce((total, amount) => total + amount, 0n);
+      }
       setDetails(powerDetails);
       setLegacyPower(legacySchedule.set ? {
         originalAchievedAt: legacySchedule.originalAchievedAt,
@@ -287,7 +341,7 @@ export const Income4 = () => {
         {card(
           "Next Achieve Power Business",
           required,
-          `Qualified business: ${qualified}`,
+          `Qualified business: ${qualified} (V1 + V2, max 40% per leg)`,
         )}
         {card("Next Power Payout At", formatTime(legacyPower?.nextInstallmentAt ?? details?.nextPayoutAt))}
       </div>
