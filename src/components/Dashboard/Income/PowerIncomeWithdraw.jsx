@@ -11,7 +11,10 @@ import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
-const V1_POWER_MANAGER_ABI = ["function powerIncomeModule() view returns(address)"];
+const V1_POWER_MANAGER_ABI = [
+  "function powerIncomeModule() view returns(address)",
+  "function rewardAchievedAt(address user,uint256 index) view returns(uint256)",
+];
 const V1_POWER_MODULE_ABI = ["function activePowerLevel(address) view returns(uint256)"];
 const V1_DIRECT_READER_ABI = [
   "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
@@ -110,22 +113,29 @@ export const PowerIncomeWithdraw = () => {
       const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, v1Provider);
       const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
-      const v1Achieved = Number(await v1PowerModule.activePowerLevel(user));
+      const [v1AchievedRaw, v1RewardTimes] = await Promise.all([
+        v1PowerModule.activePowerLevel(user),
+        Promise.all(Array.from({ length: 12 }, (_, index) => v1PowerManager.rewardAchievedAt(user, index + 1))),
+      ]);
+      const v1Achieved = Number(v1AchievedRaw);
+      const v1AchievedReward = v1RewardTimes.reduce(
+        (highest, achievedAt, index) => BigInt(achievedAt) > 0n ? index + 1 : highest,
+        0,
+      );
       const achievedReward = Number(achievedRewardRaw);
       // The next V2 target begins after the highest rank the user already
       // holds, whether that P-level is in V2 or still shown from V1.
       const effectivePowerLevel = Math.max(achieved, v1Achieved);
       const nextLevel = effectivePowerLevel < 9 ? effectivePowerLevel + 1 : 0;
-      const nextReward = achievedReward < 12 ? achievedReward + 1 : 0;
-      const requiredBusiness = nextLevel ? await registry.powerThreshold(nextLevel) : 0n;
-      const [rewardQualifiedBusiness, rewardRequiredBusiness] = nextReward
-        ? await Promise.all([
-            registry.rewardQualifiedBusiness(user, nextReward),
-            registry.rewardThreshold(nextReward),
-          ])
-        : [0n, 0n];
+      const effectiveRewardLevel = Math.max(achievedReward, v1AchievedReward);
+      const nextReward = effectiveRewardLevel < 12 ? effectiveRewardLevel + 1 : 0;
+      const [requiredBusiness, rewardRequiredBusiness] = await Promise.all([
+        nextLevel ? registry.powerThreshold(nextLevel) : 0n,
+        nextReward ? registry.rewardThreshold(nextReward) : 0n,
+      ]);
 
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
+      const rewardCapPerLeg = (rewardRequiredBusiness * 4000n) / 10000n;
       const [v1DirectResult, v2DirectResult] = await Promise.allSettled([
         (async () => {
           const count = Number(await v1Registry.getLevelUsersLength(user, 0));
@@ -174,14 +184,19 @@ export const PowerIncomeWithdraw = () => {
         const counted = nextLevel && member.inV2 && eligible
           ? (v2FormulaBusiness > capPerLeg ? capPerLeg : v2FormulaBusiness)
           : 0n;
+        const rewardCounted = nextReward && member.inV2 && eligible
+          ? (v2FormulaBusiness > rewardCapPerLeg ? rewardCapPerLeg : v2FormulaBusiness)
+          : 0n;
         return {
           sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness),
           teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted),
           countedRaw: counted,
+          rewardCountedRaw: rewardCounted,
           status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package",
         };
       }));
       const qualifiedBusiness = directRows.reduce((total, row) => total + row.countedRaw, 0n);
+      const rewardQualifiedBusiness = directRows.reduce((total, row) => total + row.rewardCountedRaw, 0n);
       const remaining = requiredBusiness > qualifiedBusiness
         ? requiredBusiness - qualifiedBusiness
         : 0n;
@@ -192,6 +207,7 @@ export const PowerIncomeWithdraw = () => {
         // P2, etc. V1 is only a fallback / separate legacy rank.
         v1Achieved: v1Achieved && v1Achieved !== achieved ? v1Achieved : 0,
         achievedReward,
+        v1AchievedReward: v1AchievedReward && v1AchievedReward !== achievedReward ? v1AchievedReward : 0,
         nextLevel,
         nextReward,
         qualifiedBusiness,
@@ -288,7 +304,7 @@ export const PowerIncomeWithdraw = () => {
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Business Remaining to Achieve</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.remaining)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Maximum Count from One Leg (40%)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.capPerLeg)} USDT</h4></div>
-        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achievedReward ? `R${summary.achievedReward}` : "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achievedReward ? `R${summary.achievedReward}` : summary?.v1AchievedReward ? `R${summary.v1AchievedReward}` : "0"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Reward</p><h4 className="withdrawal-card-value">{summary?.nextReward ? `R${summary.nextReward}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Reward)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.rewardQualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Reward Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.rewardRequiredBusiness)} USDT</h4></div>
