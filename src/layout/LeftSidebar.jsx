@@ -14,6 +14,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const location = useLocation();
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [walletAddress, setWalletAddress] = useState("");
+  const [sponsorAddress, setSponsorAddress] = useState("");
   const [userId, setUserId] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [canViewMigration, setCanViewMigration] = useState(false);
@@ -25,6 +26,13 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       return "Not Connected";
     }
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+
+  const formatSponsorAddress = (address) => {
+    if (!address || !ethers.isAddress(address) || address === ethers.ZeroAddress) {
+      return "Sponsor: Root";
+    }
+    return `Sponsor: ${formatWalletAddress(address)}`;
   };
 
   const handleNavItemClick = () => {
@@ -44,6 +52,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
       if (!address || !ethers.isAddress(address)) {
         setUserId("");
+        setSponsorAddress("");
         setCanViewMigration(false);
         setHasV1Registration(false);
         return;
@@ -58,16 +67,24 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
           ReferralNetworkABI,
           provider,
         );
-        const fetchedUserId = await referralNetwork.addressToId(address);
+        const [fetchedUserId, v2User] = await Promise.all([
+          referralNetwork.addressToId(address),
+          referralNetwork.users(address),
+        ]);
         setUserId(String(fetchedUserId ?? ""));
+        setSponsorAddress(v2User?.referral ?? v2User?.[1] ?? "");
       } catch {
         setUserId("");
+        setSponsorAddress("");
       }
       setCanViewMigration(await canAccessMigration(address));
       try {
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
         const v1User = await v1.users(address);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
+        setSponsorAddress((current) => current && current !== ethers.ZeroAddress
+          ? current
+          : (v1User?.referral ?? v1User?.[1] ?? ""));
       } catch {
         setHasV1Registration(false);
       }
@@ -79,6 +96,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
       if (!address || !ethers.isAddress(address)) {
         setUserId("");
+        setSponsorAddress("");
         setCanViewMigration(false);
         setHasV1Registration(false);
         return;
@@ -93,16 +111,24 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
           ReferralNetworkABI,
           provider,
         );
-        const fetchedUserId = await referralNetwork.addressToId(address);
+        const [fetchedUserId, v2User] = await Promise.all([
+          referralNetwork.addressToId(address),
+          referralNetwork.users(address),
+        ]);
         setUserId(String(fetchedUserId ?? ""));
+        setSponsorAddress(v2User?.referral ?? v2User?.[1] ?? "");
       } catch {
         setUserId("");
+        setSponsorAddress("");
       }
       setCanViewMigration(await canAccessMigration(address));
       try {
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
         const v1User = await v1.users(address);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
+        setSponsorAddress((current) => current && current !== ethers.ZeroAddress
+          ? current
+          : (v1User?.referral ?? v1User?.[1] ?? ""));
       } catch {
         setHasV1Registration(false);
       }
@@ -144,6 +170,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
     setIsLoggingOut(true);
     setWalletAddress("");
+    setSponsorAddress("");
     setUserId("");
     setCanViewMigration(false);
     SetSidebarOpen(false);
@@ -191,8 +218,8 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
               <img src={user} alt="" />
             </span>
             <p className="username">{userId ? `User ID: ${userId}` : "User ID: --"}</p>
-            <p className="username">{formatWalletAddress(walletAddress)}</p>
-            <p className="email">{walletAddress || "Wallet not connected"}</p>
+            <p className="username">{formatSponsorAddress(sponsorAddress)}</p>
+            <p className="email">{walletAddress ? `Wallet: ${walletAddress}` : "Wallet not connected"}</p>
           </div>
         </div>
 
