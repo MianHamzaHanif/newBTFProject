@@ -58,6 +58,18 @@ const readInBatches = async (items, read, batchSize = 4) => {
   return output;
 };
 
+// V2 totalTeamDeposit includes an imported V1 active-level seed when one was
+// made. Keep that V1 slice out of the V2 addition so a migrated member's team
+// business is represented once in My Team.
+const getV2NewTeamDeposit = async (address, v2User, v2Registry) => {
+  const v2Total = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+  if (!v2User || v2Total === 0n) return 0n;
+  const legacySeeded = (await Promise.all(
+    Array.from({ length: 15 }, (_, level) => v2Registry.legacyLevelRemaining(address, level)),
+  )).reduce((total, amount) => total + BigInt(amount), 0n);
+  return v2Total > legacySeeded ? v2Total - legacySeeded : 0n;
+};
+
 export const MyTeam = () => {
   const [selectedLevel, setSelectedLevel] = useState(1);
   const [rows, setRows] = useState([]);
@@ -325,14 +337,18 @@ export const MyTeam = () => {
           const v1Team = BigInt(v1User?.totalTeam ?? v1User?.[3] ?? 0n);
           const v2Team = BigInt(v2User?.totalTeam ?? v2User?.[3] ?? 0n);
           const v1Deposit = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n);
-          const v2Deposit = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+          const v2NewDeposit = await getV2NewTeamDeposit(member.address, v2User, v2ReferralContract);
           return {
             sno: index + 1,
             address: member.address,
             registeredAt: formatTimestamp(userData?.registeredAt ?? userData?.[2]),
             packageUsdt: formatEther4(packageTotal),
-            totalTeam: (v1Team + v2Team).toString(),
-            totalTeamDeposit: formatEther4(v1Deposit + v2Deposit),
+            // V2 carries the migrated V1 members plus any later V2 members;
+            // adding its count to V1 would show the legacy team twice.
+            totalTeam: (v2User ? v2Team : v1Team).toString(),
+            // V1 team business appears once, followed only by V2 business
+            // which is not the legacy active-level seed.
+            totalTeamDeposit: formatEther4(v1Deposit + v2NewDeposit),
           };
         }));
 

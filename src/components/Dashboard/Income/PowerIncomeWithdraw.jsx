@@ -67,6 +67,19 @@ const combinedPackageBusiness = async (address, v1Manager, v2Manager) => {
   return v1Total + v2NewTotal;
 };
 
+// `totalTeamDeposit` in V2 includes the one-time V1 level-business seed.
+// For a V1 + V2 display, add V1 once and only the portion created in V2.
+const v2NewTeamBusiness = async (address, v2User, registry) => {
+  const v2Total = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+  if (!v2User || v2Total === 0n) return 0n;
+  const seededV1Business = (await Promise.all(
+    Array.from({ length: 15 }, (_, level) =>
+      registry.legacyLevelRemaining(address, level).catch(() => 0n),
+    ),
+  )).reduce((total, amount) => total + BigInt(amount), 0n);
+  return v2Total > seededV1Business ? v2Total - seededV1Business : 0n;
+};
+
 async function ensureBscMainnet() {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
   if (BigInt(chainId) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
@@ -167,8 +180,9 @@ export const PowerIncomeWithdraw = () => {
           member.inV2 ? registry.legacyLegBusiness(user, member.address).catch(() => 0n) : 0n,
           member.inV2 ? registry.migrated(member.address).catch(() => false) : false,
         ]);
+        const v2TeamBusiness = await v2NewTeamBusiness(member.address, v2User, registry);
         const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
-          + BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+          + v2TeamBusiness;
         const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
         // This is the V2 formula shown as a read-only preview: V2's leg

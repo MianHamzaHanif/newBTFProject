@@ -16,6 +16,7 @@ export default [
   "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns (address)",
   "function legBusiness(address upline,address direct) view returns (uint256)",
   "function legacyLegBusiness(address upline,address direct) view returns (uint256)",
+  "function legacyLevelRemaining(address user,uint256 level) view returns (uint256)",
   "function legacyLegsReady(address upline) view returns (bool)",
   "function legacyLegImportCursor(address upline) view returns (uint256)",
   "function importNextLegacyLegs(address upline,uint256 maxDirects) returns (uint256 processed,uint256 totalDirects,bool completed)",

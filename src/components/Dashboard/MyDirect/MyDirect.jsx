@@ -70,6 +70,19 @@ const combinedPackageTotal = async (address, v1Manager, v2Manager) => {
   return v1Total + v2NewTotal;
 };
 
+// A V1 active-level snapshot is copied into V2's team-deposit balance during
+// the Level Business seed.  The separate legacyLevelRemaining balance lets us
+// remove that already-counted V1 portion before adding genuinely new V2 team
+// business in the My Direct table.
+const v2NewTeamBusiness = async (address, v2User, v2Registry) => {
+  const v2Total = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+  if (!v2User || v2Total === 0n) return 0n;
+  const legacySeeded = (await Promise.all(
+    Array.from({ length: 15 }, (_, level) => v2Registry.legacyLevelRemaining(address, level)),
+  )).reduce((total, amount) => total + BigInt(amount), 0n);
+  return v2Total > legacySeeded ? v2Total - legacySeeded : 0n;
+};
+
 export const MyDirect = () => {
   const [rows, setRows] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -117,12 +130,13 @@ export const MyDirect = () => {
         }
         const combined = await readInBatches(Array.from(merged.values()), async ({ address, v1User, v2User }) => {
           const user = v2User ?? v1User;
-          const selfBusiness = await combinedPackageTotal(address, v1Manager, v2Manager);
-          // The Registry's team-business counters are separate from the
-          // member's own package source index. Add V1 and V2 team business;
-          // imported package duplicates are excluded above from Self Business.
-          const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
-            + BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+          const [selfBusiness, v2TeamBusiness] = await Promise.all([
+            combinedPackageTotal(address, v1Manager, v2Manager),
+            v2NewTeamBusiness(address, v2User, v2Registry),
+          ]);
+          // V1 business appears once. Only V2 business that is not the V1
+          // seed is added, so seeded users cannot be displayed twice.
+          const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v2TeamBusiness;
           const source = v1User && v2User ? "V1 + V2" : v2User ? "V2" : "V1";
           return {
             source,
