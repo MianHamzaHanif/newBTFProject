@@ -111,14 +111,19 @@ export const Activation = () => {
                   : null,
                 };
             }));
-            return { records, pendingRoi: BigInt(pendingRoi ?? 0n), roiDay: BigInt(roiDay ?? 0n) };
+            return {
+              records,
+              pendingRoi: BigInt(pendingRoi ?? 0n),
+              roiDay: BigInt(roiDay ?? 0n),
+              aggregateUsed: BigInt(aggregateUsed ?? 0n),
+            };
           })(),
           readImportedV1Indexes(provider, user),
         ]);
 
         const failures = [];
         const v1 = v1Result.status === "fulfilled" ? v1Result.value : { records: [], oneDay: 0n };
-        const v2 = v2Result.status === "fulfilled" ? v2Result.value : { records: [], pendingRoi: 0n, roiDay: 0n };
+        const v2 = v2Result.status === "fulfilled" ? v2Result.value : { records: [], pendingRoi: 0n, roiDay: 0n, aggregateUsed: 0n };
         if (v1Result.status === "rejected") failures.push("V1 package data could not be loaded");
         if (v2Result.status === "rejected") failures.push("V2 package data could not be loaded");
         const importedIndexes = importedResult.status === "fulfilled" ? importedResult.value : null;
@@ -126,12 +131,12 @@ export const Activation = () => {
         // Should an RPC block historic logs, retain the former conservative
         // amount/time fallback. Normally importedIndexes is used instead.
         const fallbackMatches = new Map();
-        if (!importedIndexes) for (const record of v2.records) {
+        for (const record of v2.records) {
           const key = `${record.amount}|${record.timestamp}`;
           fallbackMatches.set(key, (fallbackMatches.get(key) || 0) + 1);
         }
         const visibleV1 = v1.records.filter((record) => {
-          if (importedIndexes) return !importedIndexes.has(record.v1Index);
+          if (importedIndexes?.has(record.v1Index)) return false;
           const key = `${record.amount}|${record.timestamp}`, count = fallbackMatches.get(key) || 0;
           if (!count) return true;
           fallbackMatches.set(key, count - 1);
@@ -163,6 +168,11 @@ export const Activation = () => {
         const activeMaximum = sum(activeV1, (record) => record.maximum) + sum(activeV2, (record) => record.maximum);
         const allLimit = sum(visibleV1, (record) => record.incomeLimit) + sum(v2.records, (record) => incomeLimitForPackage(record.amount));
         const activeLimit = sum(activeV1, (record) => record.incomeLimit) + sum(activeV2, (record) => incomeLimitForPackage(record.amount));
+        // V2 exposes one aggregate used-income value. Completed rows have
+        // already consumed their full tier limit, so remove those first to
+        // obtain the portion currently used by active V2 packages.
+        const inactiveV2Limit = sum(v2.records.filter((record) => !record.active), (record) => incomeLimitForPackage(record.amount));
+        const activeV2Used = v2.aggregateUsed > inactiveV2Limit ? v2.aggregateUsed - inactiveV2Limit : 0n;
         if (cancelled) return;
         setRows(viewRows.map((record, index) => ({ ...record, sno: index + 1 })));
         setSummary({
@@ -170,6 +180,7 @@ export const Activation = () => {
           activePackagesAmount: formatUsdt(activePrincipal), pendingRoi: formatUsdt(sum(activeV1, (record) => record.claimable) + v2.pendingRoi),
           roiMaximum: formatUsdt(allMaximum), roiProgress: `${percent(allGenerated, activeMaximum)}% / 100.00%`,
           allPackagesIncomeLimit: formatUsdt(allLimit), activePackagesIncomeLimit: formatUsdt(activeLimit),
+          activePackagesIncomeUsed: formatUsdt(sum(activeV1, (record) => record.usedIncome) + activeV2Used),
           roiDay: `V1: ${Number(v1.oneDay) / 60 || 0} min | V2: ${Number(v2.roiDay) / 60 || 0} min`,
         });
         setMessage(failures.length ? `${failures.join(". ")}. Other available package data is shown.` : viewRows.length ? "" : "No V1 or V2 package has been purchased yet.");
@@ -198,6 +209,7 @@ export const Activation = () => {
       <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI Progress / Target</p><h4 className="withdrawal-card-value">{summary.roiProgress}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Overall Income Claim Limit (All Packages)</p><h4 className="withdrawal-card-value">{summary.allPackagesIncomeLimit}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Claim Limit</p><h4 className="withdrawal-card-value">{summary.activePackagesIncomeLimit}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Limit Used</p><h4 className="withdrawal-card-value">{summary.activePackagesIncomeUsed}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">ROI Day</p><h4 className="withdrawal-card-value">{summary.roiDay}</h4></div>
     </div>}
     <div className="table-wrapper"><div className="table-card">

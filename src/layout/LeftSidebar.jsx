@@ -6,6 +6,7 @@ import { ReferralNetworkAddress } from "../blockchain/address";
 import { BSC_MAINNET } from "../blockchain/bscMainnetConfig";
 import { getReadWalletAddress } from "../blockchain/readProvider";
 import { canAccessMigration } from "../blockchain/migrationAccess";
+import { hasImportedLegacyPackage } from "../blockchain/legacyPackageImportState";
 import { V1_MAINNET } from "../blockchain/v1MainnetConfig";
 import user from "/dashboardimg/user.png";
 
@@ -87,9 +88,10 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       try {
         const v1Provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true });
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, v1Provider);
-        const [v1User, stakeLength] = await Promise.all([
+        const [v1User, stakeLength, v1WithdrawalDisabled] = await Promise.all([
           v1.users(address),
           new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeHistoryLength(address),
+          hasImportedLegacyPackage(address),
         ]);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
         const statuses = await Promise.all(
@@ -97,7 +99,9 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
             new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeIncomeStatus(address, index),
           ),
         );
-        setHasActiveV1Package(statuses.some((status) => !Boolean(status.completed ?? status[3])));
+        setHasActiveV1Package(
+          !v1WithdrawalDisabled && statuses.some((status) => !Boolean(status.completed ?? status[3])),
+        );
         setSponsorAddress((current) => current && current !== ethers.ZeroAddress
           ? current
           : (v1User?.referral ?? v1User?.[1] ?? ""));
@@ -143,9 +147,10 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       try {
         const v1Provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true });
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, v1Provider);
-        const [v1User, stakeLength] = await Promise.all([
+        const [v1User, stakeLength, v1WithdrawalDisabled] = await Promise.all([
           v1.users(address),
           new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeHistoryLength(address),
+          hasImportedLegacyPackage(address),
         ]);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
         const statuses = await Promise.all(
@@ -153,7 +158,9 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
             new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeIncomeStatus(address, index),
           ),
         );
-        setHasActiveV1Package(statuses.some((status) => !Boolean(status.completed ?? status[3])));
+        setHasActiveV1Package(
+          !v1WithdrawalDisabled && statuses.some((status) => !Boolean(status.completed ?? status[3])),
+        );
         setSponsorAddress((current) => current && current !== ethers.ZeroAddress
           ? current
           : (v1User?.referral ?? v1User?.[1] ?? ""));

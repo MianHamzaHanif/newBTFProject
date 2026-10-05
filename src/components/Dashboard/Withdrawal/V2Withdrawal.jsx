@@ -6,6 +6,7 @@ import { V2LedgerAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { hasImportedLegacyPackage } from "../../../blockchain/legacyPackageImportState";
 
 const V1_MIN_WITHDRAWAL = 10n ** 19n; // 10 USDT, token has 18 decimals
 // UI-only policy: V2 withdrawals are enabled from 10 USDT. Keep a larger
@@ -95,6 +96,14 @@ export default function V2Withdrawal() {
       const referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_REFERRAL_ABI, provider);
       const v1User = await referral.users(user);
       if (!Boolean(v1User?.exists ?? v1User?.[8])) {
+        setCanWithdrawV1(false);
+        setV1Overview(null);
+        return;
+      }
+      // Only the V2-Self-ROI migration path permanently disables V1
+      // withdrawals. Normal legacy package imports deliberately leave V1
+      // withdrawal available and must not be hidden here.
+      if (await hasImportedLegacyPackage(user)) {
         setCanWithdrawV1(false);
         setV1Overview(null);
         return;
