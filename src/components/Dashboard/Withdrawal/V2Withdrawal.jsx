@@ -41,6 +41,7 @@ const V1_MANAGER_ABI = [
   "function totalPackageValue(address) view returns(uint256)",
   "function getStakeHistoryLength(address) view returns(uint256)",
   "function getStakeIncomeStatus(address,uint256) view returns(uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool completed)",
+  "function getStakeRoiInfo(address,uint256) view returns(uint256 principal,uint256 maxRoi,uint256 totalAccrued,uint256 claimed,uint256 claimable)",
   "function powerIncomeModule() view returns(address)",
   "function rewardIncomeModule() view returns(address)",
   "function withdrawIncome() external",
@@ -109,12 +110,12 @@ export default function V2Withdrawal() {
         return;
       }
       const [
-        directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable,
+        directClaimable, directClaimed, selfClaimed, levelClaimable,
         levelClaimed, powerCredited, powerClaimed, rewardClaimed, stakeHistoryLength,
         powerModuleAddress, rewardModuleAddress, walletIncome,
       ] = await Promise.all([
         manager.pendingDirectIncomeToken(user), manager.totalDirectIncomeToken(user),
-        referral.getSelfRoiClaimableFor(user), manager.totalSelfRoiIncomeClaimed(user),
+        manager.totalSelfRoiIncomeClaimed(user),
         referral.getTotalLevelRoiClaimableFor(user), manager.totalLevelRoiClaimed(user),
         manager.totalPowerIncomeCredited(user),
         manager.totalPowerIncomeClaimed(user), manager.totalRewardIncomeClaimed(user),
@@ -129,8 +130,19 @@ export default function V2Withdrawal() {
       // V1's public incomeLimitBP is a legacy aggregate rate and does not
       // represent the tier cap of a $25/$100/$500/$1000 package. Sum the
       // contract's own per-package limits instead.
-      const stakeStatuses = await Promise.all(
-        Array.from({ length: Number(stakeHistoryLength) }, (_, index) => manager.getStakeIncomeStatus(user, index)),
+      const [stakeStatuses, stakeRois] = await Promise.all([
+        Promise.all(
+          Array.from({ length: Number(stakeHistoryLength) }, (_, index) => manager.getStakeIncomeStatus(user, index)),
+        ),
+        Promise.all(
+          Array.from({ length: Number(stakeHistoryLength) }, (_, index) => manager.getStakeRoiInfo(user, index)),
+        ),
+      ]);
+      // Read through PackageManager rather than ReferralNetwork's raw self
+      // ROI helper. The Manager excludes stale ROI from completed packages,
+      // exactly as `withdrawIncome()` does.
+      const selfClaimable = stakeRois.reduce(
+        (total, roi) => total + BigInt(roi.claimable ?? roi[4] ?? 0n), 0n,
       );
       const incomeLimit = stakeStatuses.reduce(
         (total, status) => total + BigInt(status.incomeLimit ?? status[0] ?? 0n), 0n,
