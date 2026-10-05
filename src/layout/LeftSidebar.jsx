@@ -19,7 +19,12 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [canViewMigration, setCanViewMigration] = useState(false);
   const [hasV1Registration, setHasV1Registration] = useState(false);
+  const [hasActiveV1Package, setHasActiveV1Package] = useState(false);
   const V1_USER_ABI = ["function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)"];
+  const V1_PACKAGE_STATUS_ABI = [
+    "function getStakeHistoryLength(address) view returns(uint256)",
+    "function getStakeIncomeStatus(address,uint256) view returns(uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool completed)",
+  ];
 
   const formatWalletAddress = (address) => {
     if (!address) {
@@ -55,6 +60,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setSponsorAddress("");
         setCanViewMigration(false);
         setHasV1Registration(false);
+        setHasActiveV1Package(false);
         return;
       }
 
@@ -79,14 +85,25 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       }
       setCanViewMigration(await canAccessMigration(address));
       try {
-        const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
-        const v1User = await v1.users(address);
+        const v1Provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true });
+        const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, v1Provider);
+        const [v1User, stakeLength] = await Promise.all([
+          v1.users(address),
+          new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeHistoryLength(address),
+        ]);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
+        const statuses = await Promise.all(
+          Array.from({ length: Number(stakeLength) }, (_, index) =>
+            new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeIncomeStatus(address, index),
+          ),
+        );
+        setHasActiveV1Package(statuses.some((status) => !Boolean(status.completed ?? status[3])));
         setSponsorAddress((current) => current && current !== ethers.ZeroAddress
           ? current
           : (v1User?.referral ?? v1User?.[1] ?? ""));
       } catch {
         setHasV1Registration(false);
+        setHasActiveV1Package(false);
       }
     };
 
@@ -99,6 +116,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setSponsorAddress("");
         setCanViewMigration(false);
         setHasV1Registration(false);
+        setHasActiveV1Package(false);
         return;
       }
 
@@ -123,14 +141,25 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       }
       setCanViewMigration(await canAccessMigration(address));
       try {
-        const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true }));
-        const v1User = await v1.users(address);
+        const v1Provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true });
+        const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, v1Provider);
+        const [v1User, stakeLength] = await Promise.all([
+          v1.users(address),
+          new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeHistoryLength(address),
+        ]);
         setHasV1Registration(Boolean(v1User?.exists ?? v1User?.[8]));
+        const statuses = await Promise.all(
+          Array.from({ length: Number(stakeLength) }, (_, index) =>
+            new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_STATUS_ABI, v1Provider).getStakeIncomeStatus(address, index),
+          ),
+        );
+        setHasActiveV1Package(statuses.some((status) => !Boolean(status.completed ?? status[3])));
         setSponsorAddress((current) => current && current !== ethers.ZeroAddress
           ? current
           : (v1User?.referral ?? v1User?.[1] ?? ""));
       } catch {
         setHasV1Registration(false);
+        setHasActiveV1Package(false);
       }
     };
 
@@ -173,6 +202,8 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
     setSponsorAddress("");
     setUserId("");
     setCanViewMigration(false);
+    setHasV1Registration(false);
+    setHasActiveV1Package(false);
     SetSidebarOpen(false);
     navigate("/login", { replace: true });
 
@@ -379,7 +410,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
 
             {activeDropdown === "withdrawal" && (
               <div className="dropdown open withdrawal-dropdown">
-                {hasV1Registration && <NavLink
+                {hasV1Registration && hasActiveV1Package && <NavLink
                   to="/withdrawal/v1"
                   className="nav"
                   onClick={handleNavItemClick}

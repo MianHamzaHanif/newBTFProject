@@ -197,7 +197,7 @@ export const Activation = () => {
       <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI 3x Limit</p><h4 className="withdrawal-card-value">{summary.roiMaximum}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI Progress / Target</p><h4 className="withdrawal-card-value">{summary.roiProgress}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Overall Income Claim Limit (All Packages)</p><h4 className="withdrawal-card-value">{summary.allPackagesIncomeLimit}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Active Income Claim Limit</p><h4 className="withdrawal-card-value">{summary.activePackagesIncomeLimit}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Claim Limit</p><h4 className="withdrawal-card-value">{summary.activePackagesIncomeLimit}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">ROI Day</p><h4 className="withdrawal-card-value">{summary.roiDay}</h4></div>
     </div>}
     <div className="table-wrapper"><div className="table-card">
