@@ -33,10 +33,10 @@ const V1_MANAGER_ABI = [
   "function totalDirectIncomeToken(address) view returns(uint256)",
   "function totalSelfRoiIncomeClaimed(address) view returns(uint256)",
   "function totalLevelRoiClaimed(address) view returns(uint256)",
+  "function totalPowerIncomeCredited(address) view returns(uint256)",
   "function totalPowerIncomeClaimed(address) view returns(uint256)",
   "function totalRewardIncomeClaimed(address) view returns(uint256)",
-  "function withdrawFeeBP() view returns(uint256)",
-  "function bp() view returns(uint256)",
+  "function incomeWalletToken(address) view returns(uint256)",
   "function totalPackageValue(address) view returns(uint256)",
   "function getStakeHistoryLength(address) view returns(uint256)",
   "function getStakeIncomeStatus(address,uint256) view returns(uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool completed)",
@@ -101,16 +101,17 @@ export default function V2Withdrawal() {
       }
       const [
         directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable,
-        levelClaimed, powerClaimed, rewardClaimed, stakeHistoryLength,
-        powerModuleAddress, rewardModuleAddress, withdrawFeeBP, basisPoints,
+        levelClaimed, powerCredited, powerClaimed, rewardClaimed, stakeHistoryLength,
+        powerModuleAddress, rewardModuleAddress, walletIncome,
       ] = await Promise.all([
         manager.pendingDirectIncomeToken(user), manager.totalDirectIncomeToken(user),
         referral.getSelfRoiClaimableFor(user), manager.totalSelfRoiIncomeClaimed(user),
         referral.getTotalLevelRoiClaimableFor(user), manager.totalLevelRoiClaimed(user),
+        manager.totalPowerIncomeCredited(user),
         manager.totalPowerIncomeClaimed(user), manager.totalRewardIncomeClaimed(user),
         manager.getStakeHistoryLength(user),
         manager.powerIncomeModule(), manager.rewardIncomeModule(),
-        manager.withdrawFeeBP(), manager.bp(),
+        manager.incomeWalletToken(user),
       ]);
       const [powerClaimable, rewardClaimable] = await Promise.all([
         new ethers.Contract(powerModuleAddress, V1_RANK_MODULE_ABI, provider).rawClaimable(user),
@@ -128,7 +129,7 @@ export default function V2Withdrawal() {
       // The V1 withdrawal route is only available while at least one V1
       // package is active. Completed V1-only accounts use the V2 route.
       setCanWithdrawV1(stakeStatuses.some((status) => !Boolean(status.completed ?? status[3])));
-      setV1Overview({ directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable, levelClaimed, powerClaimable, powerClaimed, rewardClaimable, rewardClaimed, incomeLimit, withdrawFeeBP, basisPoints, totalClaimable: BigInt(directClaimable) + BigInt(selfClaimable) + BigInt(levelClaimable) + BigInt(powerClaimable) + BigInt(rewardClaimable) });
+      setV1Overview({ directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable, levelClaimed, powerClaimable, powerCredited, powerClaimed, rewardClaimable, rewardClaimed, incomeLimit, walletIncome, totalClaimable: BigInt(directClaimable) + BigInt(selfClaimable) + BigInt(levelClaimable) + BigInt(powerClaimable) + BigInt(rewardClaimable) });
     } catch (error) {
       setCanWithdrawV1(false);
       setV1Overview(null);
@@ -196,15 +197,24 @@ export default function V2Withdrawal() {
   const v1TotalClaimed = BigInt(v1Overview?.directClaimed ?? 0n)
     + BigInt(v1Overview?.selfClaimed ?? 0n)
     + BigInt(v1Overview?.levelClaimed ?? 0n)
-    + BigInt(v1Overview?.powerClaimed ?? 0n)
+    + BigInt(v1Overview?.powerCredited ?? 0n)
     + BigInt(v1Overview?.rewardClaimed ?? 0n);
   const v1IncomeLimit = BigInt(v1Overview?.incomeLimit ?? 0n);
   const v1NinetyPercentLimit = (v1IncomeLimit * V1_WITHDRAWAL_CAP_BP) / 100n;
   const v1NinetyPercentReached = v1IncomeLimit > 0n && v1TotalClaimed >= v1NinetyPercentLimit;
   const v1TotalClaimable = BigInt(v1Overview?.totalClaimable ?? 0n);
-  const v1WithdrawFeeBP = BigInt(v1Overview?.withdrawFeeBP ?? 0n);
-  const v1BasisPoints = BigInt(v1Overview?.basisPoints ?? 10_000n) || 10_000n;
-  const v1NetReceivable = v1TotalClaimable - ((v1TotalClaimable * v1WithdrawFeeBP) / v1BasisPoints);
+  const v1WalletIncome = BigInt(v1Overview?.walletIncome ?? 0n);
+  const v1RemainingIncomeLimit = v1IncomeLimit > v1TotalClaimed
+    ? v1IncomeLimit - v1TotalClaimed
+    : 0n;
+  // V1 credits only the part of a raw claimable amount which still fits in
+  // the package-income limit; the excess is flushed. This preview mirrors
+  // that cap and adds any income already in the V1 wallet.
+  const v1ClaimableWithinLimit = v1TotalClaimable > v1RemainingIncomeLimit
+    ? v1RemainingIncomeLimit
+    : v1TotalClaimable;
+  const v1GrossWithdrawable = v1WalletIncome + v1ClaimableWithinLimit;
+  const v1WithdrawableReceived = v1GrossWithdrawable;
 
   const withdraw = async () => {
     if (!window.ethereum) {
@@ -291,8 +301,9 @@ export default function V2Withdrawal() {
           <div className="withdrawal-card"><p className="withdrawal-card-title">Reward Claimable</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.rewardClaimable)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Total Reward Income Claimed</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.rewardClaimed)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Income Limit Token</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.incomeLimit)} USDT</h4></div>
+          <div className="withdrawal-card"><p className="withdrawal-card-title">Income Limit Withdraw</p><h4 className="withdrawal-card-value">{formatUsdt(v1TotalClaimed)} USDT</h4></div>
           <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimable Income</p><h4 className="withdrawal-card-value">{formatUsdt(v1TotalClaimable)} USDT</h4></div>
-          <div className="withdrawal-card"><p className="withdrawal-card-title">Claimable Received (with Fee)</p><h4 className="withdrawal-card-value">{formatUsdt(v1NetReceivable)} USDT</h4></div>
+          <div className="withdrawal-card"><p className="withdrawal-card-title">Withdrawable Received</p><h4 className="withdrawal-card-value">{formatUsdt(v1WithdrawableReceived)} USDT</h4></div>
         </div>
         <div className="withdraw-action-wrap">
           <button className="custom-button withdraw-btn" onClick={withdrawV1} disabled={v1Loading || v1Withdrawing || v1NinetyPercentReached || BigInt(v1Overview?.totalClaimable ?? 0n) < V1_MIN_WITHDRAWAL}>
