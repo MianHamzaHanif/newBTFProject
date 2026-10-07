@@ -1,10 +1,12 @@
+import { TableCell } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
+import CustomTable from "../CommonComponents/CustomTable";
 import { getReadWalletAddress } from "../../../blockchain/readProvider";
 import { canAccessMigration } from "../../../blockchain/migrationAccess";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
-import { ReferralNetworkAddress, PackageManagerAddress, V2ManualLegacyImporterAddress, V2VerifiedLegacyImporterAddress, V2VerifiedLegacyRankImporterAddress, V2ManualLegacyLevelBridgeAddress } from "../../../blockchain/address";
+import { ReferralNetworkAddress, PackageManagerAddress, V2LedgerAddress, V2ManualLegacyImporterAddress, V2VerifiedLegacyImporterAddress, V2VerifiedLegacyRankImporterAddress, V2ManualLegacyLevelBridgeAddress } from "../../../blockchain/address";
 import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import "./MigrationData.css";
 import "../styles/style.css";
@@ -72,7 +74,11 @@ const V2_STRUCTURE_MIGRATION_ABI = [
   "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
   "function isMigrationAuthority(address) view returns(bool)",
 ];
+const V2_LEDGER_MIGRATION_ABI = [
+  "function getUserIncomeHistoryLengthByType(address user,uint8 incomeType) view returns(uint256)",
+];
 const NEXT_USER_SCAN_BATCH_SIZE = 10;
+const NEAR_LIMIT_THRESHOLD = 10n * 10n ** 18n;
 // Tree registration is complete/not required for this deployment. Keep the
 // implementation available for a future controlled migration, but hide it
 // from the operational UI.
@@ -104,6 +110,13 @@ const resolvedWalletAddress = (value) => {
   // Lowercase is always accepted by ethers and EVM ABI encoding, including
   // when a previously persisted UI value had invalid mixed-case checksum.
   return normalized.toLowerCase();
+};
+
+const formatUsdt = (value) => {
+  try {
+    const [whole, decimals = ""] = ethers.formatUnits(value ?? 0n, 18).split(".");
+    return `${whole}.${(decimals + "0000").slice(0, 4)}`;
+  } catch { return "0.0000"; }
 };
 
 async function ensureBscMainnet() {
@@ -163,6 +176,10 @@ export default function MigrationData() {
   const [nextV1Id, setNextV1Id] = useState("1");
   const [nextV1User, setNextV1User] = useState(null);
   const [loadingNextV1User, setLoadingNextV1User] = useState(false);
+  const [nearLimitUsers, setNearLimitUsers] = useState([]);
+  const [refreshingNearLimitUsers, setRefreshingNearLimitUsers] = useState(false);
+  const [nearLimitUsersError, setNearLimitUsersError] = useState("");
+  const [nearLimitUsersScanned, setNearLimitUsersScanned] = useState(0);
   const verifiedPackageImport = ethers.isAddress(V2VerifiedLegacyImporterAddress) && V2VerifiedLegacyImporterAddress !== ethers.ZeroAddress;
   const verifiedRankImport = ethers.isAddress(V2VerifiedLegacyRankImporterAddress) && V2VerifiedLegacyRankImporterAddress !== ethers.ZeroAddress;
 
@@ -754,6 +771,101 @@ export default function MigrationData() {
     } finally { setImporting(false); }
   };
 
+  const refreshNearLimitUsers = async () => {
+    if (!verifiedPackageImport) {
+      setNearLimitUsersError("Verified legacy importer address is not configured.");
+      return;
+    }
+    try {
+      setRefreshingNearLimitUsers(true);
+      setNearLimitUsersError("");
+      setNearLimitUsers([]);
+      setNearLimitUsersScanned(0);
+
+      const v1Provider = createV1ReadProvider();
+      const v2Provider = new ethers.JsonRpcProvider(
+        BSC_MAINNET.rpcUrls[1], BSC_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 },
+      );
+      const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_STRUCTURE_READER_ABI, v1Provider);
+      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_PACKAGE_READER_ABI, v1Provider);
+      const v2Registry = new ethers.Contract(ReferralNetworkAddress, V2_STRUCTURE_MIGRATION_ABI, v2Provider);
+      const verifiedImporter = new ethers.Contract(V2VerifiedLegacyImporterAddress, VERIFIED_IMPORTER_ABI, v2Provider);
+      const v2Ledger = new ethers.Contract(V2LedgerAddress, V2_LEDGER_MIGRATION_ABI, v2Provider);
+      const nextUserId = Number(await v1Registry.nextUserId());
+      const ids = Array.from({ length: Math.max(nextUserId - 1, 0) }, (_, index) => index + 1);
+      const candidates = [];
+
+      for (let offset = 0; offset < ids.length; offset += NEXT_USER_SCAN_BATCH_SIZE) {
+        const batch = ids.slice(offset, offset + NEXT_USER_SCAN_BATCH_SIZE);
+        const entries = await Promise.all(batch.map(async (id) => {
+          const address = await v1Registry.idToAddress(id);
+          if (address === ethers.ZeroAddress) return null;
+          const [profile, packageLength] = await Promise.all([
+            v1Registry.users(address),
+            v1Manager.getStakeHistoryLength(address),
+          ]);
+          if (!Boolean(profile?.exists ?? profile?.[8]) || packageLength === 0n) return null;
+          const statuses = await Promise.all(
+            Array.from({ length: Number(packageLength) }, (_, index) => v1Manager.getStakeIncomeStatus(address, index)),
+          );
+          const incomeLimit = statuses.reduce((total, status) => total + BigInt(status.incomeLimit ?? status[0] ?? 0n), 0n);
+          const usedIncome = statuses.reduce((total, status) => total + BigInt(status.usedIncome ?? status[1] ?? 0n), 0n);
+          const remainingIncome = incomeLimit > usedIncome ? incomeLimit - usedIncome : 0n;
+          if (remainingIncome >= NEAR_LIMIT_THRESHOLD) return null;
+          return { id, address, incomeLimit, usedIncome, remainingIncome };
+        }));
+        candidates.push(...entries.filter(Boolean));
+        setNearLimitUsersScanned(Math.min(offset + batch.length, ids.length));
+      }
+
+      const unresolved = [];
+      for (let offset = 0; offset < candidates.length; offset += NEXT_USER_SCAN_BATCH_SIZE) {
+        const batch = candidates.slice(offset, offset + NEXT_USER_SCAN_BATCH_SIZE);
+        const entries = await Promise.all(batch.map(async (candidate) => {
+          const [levelBusinessSeeded, levelRoiImported, legacyPackageImported, levelRoiCreditCount] = await Promise.all([
+            v2Registry.legacyLevelSeeded(candidate.address),
+            verifiedImporter.legacyLevelRoiImported(candidate.address),
+            verifiedImporter.imported(candidate.address),
+            v2Ledger.getUserIncomeHistoryLengthByType(candidate.address, 2),
+          ]);
+          // Earlier authorised Level-ROI imports credited the V2 ledger but
+          // did not always set the current importer's status flag. A legacy
+          // package holder with Level-ROI ledger credits has already had that
+          // snapshot migrated and must not be offered again by this queue.
+          const levelRoiCompleted = levelRoiImported
+            || (legacyPackageImported && levelRoiCreditCount > 0n);
+          // Once both one-time migrations are complete, this user must no
+          // longer be offered by the operational queue.
+          if (levelBusinessSeeded && levelRoiCompleted) return null;
+          return {
+            ...candidate,
+            levelBusiness: levelBusinessSeeded ? "Completed" : "Pending",
+            levelRoi: levelRoiCompleted ? "Completed" : "Pending",
+          };
+        }));
+        unresolved.push(...entries.filter(Boolean));
+      }
+
+      setNearLimitUsers(unresolved
+        .sort((left, right) => left.remainingIncome === right.remainingIncome
+          ? left.id - right.id
+          : left.remainingIncome < right.remainingIncome ? -1 : 1)
+        .map((entry, index) => ({
+          ...entry,
+          sno: index + 1,
+          wallet: entry.address,
+          incomeLimitDisplay: formatUsdt(entry.incomeLimit),
+          usedIncomeDisplay: formatUsdt(entry.usedIncome),
+          remainingIncomeDisplay: formatUsdt(entry.remainingIncome),
+        })));
+    } catch (error) {
+      setNearLimitUsers([]);
+      setNearLimitUsersError(error?.shortMessage || error?.message || "Near-limit V1 users could not be scanned.");
+    } finally {
+      setRefreshingNearLimitUsers(false);
+    }
+  };
+
   if (!accessChecked) return <div className="page-container migration-page"><div className="migration-form-shell"><p className="migration-panel-note">Checking migration access...</p></div></div>;
   if (!canViewMigration) return <div className="page-container migration-page"><div className="migration-form-shell"><div className="migration-form-heading"><div className="migration-form-icon"><i className="bi bi-shield-lock" /></div><div><h1>Migration Access Restricted</h1><p>Only the V2 Registry owner, a wallet with <code>migrationOperator = true</code>, or an approved migrated-wallet viewer can view Migration Data.</p></div></div></div></div>;
 
@@ -814,12 +926,39 @@ export default function MigrationData() {
       <div className="migration-actions"><button className="migration-primary-button" onClick={importPendingLevelRoiBatch} disabled={importing || !verifiedPackageImport || !pendingLevelRoiRefreshed}>{importing ? "Processing..." : "Import All V1 Pending Level ROI"}</button></div>
     </div>
     <div className="migration-level-panel">
-      <div className="migration-section-title"><span>5</span> Verified V1 Power & Reward Income</div>
+      <div className="migration-section-title"><span>6</span> Verified V1 Power & Reward Income</div>
       <p className="migration-panel-note">Beneficiary address above is passed to the importer. It reads the current V1 Power/Reward ranks, achieved time, claimed and flush state, then imports only the remaining pending income. No Power/Reward amount, rank or timestamp can be typed manually.</p>
       <div className="migration-level-refresh"><button className="migration-secondary-action" onClick={checkV1PowerAndReward} disabled={checkingV1Ranks || importing}>{checkingV1Ranks ? "Checking V1 Ranks..." : "Check V1 Power & Reward"}</button>{v1RankCheckError && <span>{v1RankCheckError}</span>}</div>
       {v1RankSnapshot && <div className="migration-rank-results"><div className="migration-rank-card"><span>V1 Power Rank</span><strong>{v1RankSnapshot.powerLevel === 0n ? "No Power Rank" : `P${v1RankSnapshot.powerLevel}`}</strong><small>Unclaimed: {ethers.formatUnits(v1RankSnapshot.powerPending, 18)} USDT</small><small>Claimed installments: {v1RankSnapshot.powerPaid.toString()} | Flush: {ethers.formatUnits(v1RankSnapshot.powerFlush, 18)} USDT</small></div><div className="migration-rank-card"><span>V1 Reward Rank</span><strong>{v1RankSnapshot.rewards.length ? `R${v1RankSnapshot.rewards.length}` : "No Reward Rank"}</strong><small>Unclaimed: {ethers.formatUnits(v1RankSnapshot.rewards.reduce((total, reward) => total + reward.pending, 0n), 18)} USDT</small><small>Flush: {ethers.formatUnits(v1RankSnapshot.rewardFlush, 18)} USDT</small>{v1RankSnapshot.rewards.map((reward) => <small key={reward.index}>R{reward.index}: {ethers.formatUnits(reward.pending, 18)} USDT pending</small>)}</div></div>}
       {!verifiedRankImport && <div className="migration-message">Set <code>VITE_BTF_V2_VERIFIED_LEGACY_RANK_IMPORTER_ADDRESS</code> before using verified Power/Reward migration.</div>}
       <div className="migration-actions"><button className="migration-primary-button" onClick={importVerifiedRanks} disabled={importing || !verifiedRankImport}>{importing ? "Processing..." : "Import Verified V1 Power & Reward"}<i className="bi bi-lightning-charge" /></button></div>
+    </div>
+    <div className="migration-level-panel">
+      <div className="migration-section-title"><span>7</span> V1 Near-Limit Migration Queue</div>
+      <p className="migration-panel-note">Shows registered V1 package holders with less than 10 USDT remaining income limit. A user leaves this queue only after both V2 Level Business and V1 Pending Level ROI migrations are completed.</p>
+      <div className="migration-level-refresh">
+        <button className="migration-secondary-action" onClick={refreshNearLimitUsers} disabled={refreshingNearLimitUsers || importing}>
+          {refreshingNearLimitUsers ? `Scanning V1 Users (${nearLimitUsersScanned})...` : "Refresh Near-Limit Users"}
+        </button>
+        {nearLimitUsersError && <span>{nearLimitUsersError}</span>}
+      </div>
+      {!refreshingNearLimitUsers && nearLimitUsersScanned > 0 && !nearLimitUsersError && <p className="migration-panel-note">Scanned {nearLimitUsersScanned} V1 IDs. {nearLimitUsers.length} user(s) still require one or both migrations.</p>}
+      <CustomTable
+        columns={[
+          { id: "sno", label: "S. No", sortable: true },
+          { id: "id", label: "V1 User ID", sortable: true },
+          { id: "wallet", label: "Wallet", sortable: true },
+          { id: "incomeLimitDisplay", label: "Income Limit", sortable: true },
+          { id: "usedIncomeDisplay", label: "Used Income", sortable: true },
+          { id: "remainingIncomeDisplay", label: "Remaining Limit", sortable: true },
+          { id: "levelBusiness", label: "Level Business", sortable: true },
+          { id: "levelRoi", label: "Level ROI", sortable: true },
+        ]}
+        rows={nearLimitUsers}
+        renderRow={(row) => <>
+          <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.id}</TableCell><TableCell align="center" className="team-address-cell">{row.wallet}</TableCell><TableCell align="center">{row.incomeLimitDisplay} USDT</TableCell><TableCell align="center">{row.usedIncomeDisplay} USDT</TableCell><TableCell align="center">{row.remainingIncomeDisplay} USDT</TableCell><TableCell align="center">{row.levelBusiness}</TableCell><TableCell align="center">{row.levelRoi}</TableCell>
+        </>}
+      />
     </div>
     {message && <div className="migration-message">{message}</div>}
   </div></div>;

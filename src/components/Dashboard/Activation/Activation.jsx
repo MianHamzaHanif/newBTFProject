@@ -173,6 +173,8 @@ export const Activation = () => {
         // obtain the portion currently used by active V2 packages.
         const inactiveV2Limit = sum(v2.records.filter((record) => !record.active), (record) => incomeLimitForPackage(record.amount));
         const activeV2Used = v2.aggregateUsed > inactiveV2Limit ? v2.aggregateUsed - inactiveV2Limit : 0n;
+        const activeIncomeUsed = sum(activeV1, (record) => record.usedIncome) + activeV2Used;
+        const activeIncomeRemaining = activeLimit > activeIncomeUsed ? activeLimit - activeIncomeUsed : 0n;
         if (cancelled) return;
         setRows(viewRows.map((record, index) => ({ ...record, sno: index + 1 })));
         setSummary({
@@ -180,7 +182,8 @@ export const Activation = () => {
           activePackagesAmount: formatUsdt(activePrincipal), pendingRoi: formatUsdt(sum(activeV1, (record) => record.claimable) + v2.pendingRoi),
           roiMaximum: formatUsdt(allMaximum), roiProgress: `${percent(allGenerated, activeMaximum)}% / 100.00%`,
           allPackagesIncomeLimit: formatUsdt(allLimit), activePackagesIncomeLimit: formatUsdt(activeLimit),
-          activePackagesIncomeUsed: formatUsdt(sum(activeV1, (record) => record.usedIncome) + activeV2Used),
+          activePackagesIncomeUsed: formatUsdt(activeIncomeUsed),
+          activePackagesIncomeRemaining: formatUsdt(activeIncomeRemaining),
           roiDay: `V1: ${Number(v1.oneDay) / 60 || 0} min | V2: ${Number(v2.roiDay) / 60 || 0} min`,
         });
         setMessage(failures.length ? `${failures.join(". ")}. Other available package data is shown.` : viewRows.length ? "" : "No V1 or V2 package has been purchased yet.");
@@ -210,6 +213,7 @@ export const Activation = () => {
       <div className="withdrawal-card"><p className="withdrawal-card-title">Overall Income Claim Limit (All Packages)</p><h4 className="withdrawal-card-value">{summary.allPackagesIncomeLimit}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Claim Limit</p><h4 className="withdrawal-card-value">{summary.activePackagesIncomeLimit}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Limit Used</p><h4 className="withdrawal-card-value">{summary.activePackagesIncomeUsed}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Limit Remaining</p><h4 className="withdrawal-card-value">{summary.activePackagesIncomeRemaining}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">ROI Day</p><h4 className="withdrawal-card-value">{summary.roiDay}</h4></div>
     </div>}
     <div className="table-wrapper"><div className="table-card">
