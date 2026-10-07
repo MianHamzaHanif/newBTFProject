@@ -129,6 +129,27 @@ async function readV2Income(wallet, incomeType) {
   return { ready, claimed: records.reduce((total, record) => total + record.amount, 0n), records };
 }
 
+// A Level ROI claim can contain separate credits for several downline levels
+// in one transaction/block timestamp. The user sees it as one Level ROI
+// claim, so present a single total row while retaining all other income rows.
+function groupSameTimeLevelRoi(records) {
+  const grouped = new Map();
+  for (const record of records) {
+    if (record.incomeType !== "Level ROI") {
+      grouped.set(`row:${grouped.size}`, record);
+      continue;
+    }
+    const key = `level-roi:${record.timestamp}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.amount += record.amount;
+    } else {
+      grouped.set(key, { ...record });
+    }
+  }
+  return [...grouped.values()];
+}
+
 export default function V2ClaimHistory({ eventName = "", heading = "Claim History" }) {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({ v1Pending: 0n, v1Claimed: 0n, v2Ready: 0n, v2Claimed: 0n });
@@ -153,7 +174,7 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
       ]);
       const v1 = v1Result.status === "fulfilled" ? v1Result.value : { pending: 0n, claimed: 0n, records: [] };
       const v2 = v2Result.status === "fulfilled" ? v2Result.value : { ready: 0n, claimed: 0n, records: [] };
-      const combinedRows = [...v1.records, ...v2.records]
+      const combinedRows = groupSameTimeLevelRoi([...v1.records, ...v2.records])
         .sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
         .map((record, index) => ({
           ...record,
