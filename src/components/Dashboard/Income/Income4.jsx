@@ -343,7 +343,14 @@ export const Income4 = () => {
           required,
           `Qualified business: ${qualified} (V1 + V2, max 40% per leg)`,
         )}
-        {card("Next Power Payout At", formatTime(legacyPower?.nextInstallmentAt ?? details?.nextPayoutAt))}
+        {card(
+          "Next Power Payout At",
+          // A historical migrated schedule (for example P2) must not
+          // override the payout date of the user's current native V2 rank
+          // (for example active P3). Fall back to it only when no V2 Power
+          // level is active.
+          formatTime(nativeActiveLevel ? details?.nextPayoutAt : legacyPower?.nextInstallmentAt ?? details?.nextPayoutAt),
+        )}
       </div>
 
       {message ? <p className="text-danger">{message}</p> : null}
