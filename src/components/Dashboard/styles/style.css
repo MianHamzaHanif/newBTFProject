@@ -355,6 +355,57 @@
     margin-top: 14px;
 }
 
+/* Compact DAO proposal picker: avoid the dashboard-wide trapezoid `.btn`
+   styling so proposal IDs remain clear and usable on small screens. */
+.dao-proposal-button-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.dao-proposal-button,
+.dao-proposal-vote-button {
+    min-height: 44px;
+    border-radius: 10px;
+    border: 1px solid rgba(76, 235, 194, 0.58);
+    color: #dffff4;
+    font-size: 16px;
+    font-weight: 800;
+    background: rgba(18, 96, 112, 0.46);
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.dao-proposal-button:hover:not(:disabled),
+.dao-proposal-button.selected {
+    color: #06233a;
+    background: linear-gradient(90deg, #19f28a, #00cfc8 55%, #2edbff);
+    box-shadow: 0 0 18px rgba(25, 242, 138, 0.32);
+}
+
+.dao-proposal-button:disabled,
+.dao-proposal-vote-button:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+
+.dao-proposal-vote-wrap {
+    display: flex;
+    justify-content: center;
+    margin-top: 18px;
+}
+
+.dao-proposal-vote-button {
+    width: min(100%, 220px);
+    color: #06233a;
+    background: linear-gradient(90deg, #19f28a, #00cfc8 55%, #2edbff);
+}
+
+@media (max-width: 420px) {
+    .dao-proposal-button-grid { gap: 8px; }
+    .dao-proposal-button { min-height: 40px; font-size: 14px; }
+}
+
 .withdraw-status {
     margin-top: 10px;
 }

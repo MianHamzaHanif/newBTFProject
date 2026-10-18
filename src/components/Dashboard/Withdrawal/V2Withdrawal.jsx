@@ -118,6 +118,7 @@ export default function V2Withdrawal() {
   const [v1Withdrawing, setV1Withdrawing] = useState(false);
   const [daoVoting, setDaoVoting] = useState({ loading: false, visible: false, proposals: [], message: "" });
   const [votingProposalId, setVotingProposalId] = useState(null);
+  const [selectedDaoProposalId, setSelectedDaoProposalId] = useState(null);
 
   const loadDaoVoting = useCallback(async () => {
     try {
@@ -443,6 +444,7 @@ export default function V2Withdrawal() {
       const tx = await dao.castVote(proposalId, DAO_VOTE_FOR);
       await tx.wait();
       await loadDaoVoting();
+      setSelectedDaoProposalId(null);
     } catch {
       // The wallet/provider displays the transaction rejection or contract
       // revert. Keep this compact voting form free of extra status cards.
@@ -517,16 +519,26 @@ export default function V2Withdrawal() {
 
       {(daoVoting.visible || showDaoOnly) && availableDaoProposalIds.length > 0 && <div id="dao-voting" className="table-card" style={{ marginTop: "24px" }}>
         <p className="withdrawal-card-title mb-3">Proposal ID</p>
-        <div className="d-flex flex-wrap gap-2">
+        <div className="dao-proposal-button-grid">
           {availableDaoProposalIds.map((proposalId) => <button
             key={proposalId.toString()}
             type="button"
-            className="btn btn-outline-primary px-4"
-            onClick={() => voteForProposal(proposalId)}
+            className={`dao-proposal-button ${selectedDaoProposalId === proposalId ? "selected" : ""}`}
+            onClick={() => setSelectedDaoProposalId(proposalId)}
             disabled={votingProposalId !== null}
           >
-            {votingProposalId === proposalId ? "Voting..." : proposalId.toString()}
+            {proposalId.toString()}
           </button>)}
+        </div>
+        <div className="dao-proposal-vote-wrap">
+          <button
+            type="button"
+            className="dao-proposal-vote-button"
+            onClick={() => voteForProposal(selectedDaoProposalId)}
+            disabled={selectedDaoProposalId === null || votingProposalId !== null}
+          >
+            {votingProposalId !== null ? "Voting..." : "Vote"}
+          </button>
         </div>
       </div>}
 
