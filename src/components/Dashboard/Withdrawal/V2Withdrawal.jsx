@@ -82,6 +82,7 @@ const REGISTRY_VOTING_ABI = [
   "function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)",
 ];
 const DAO_VOTE_FOR = 1;
+const DAO_VOTING_PROPOSAL_IDS = [18n, 19n, 20n, 21n];
 
 const ensureBscMainnet = async () => {
   const currentChain = await window.ethereum.request({ method: "eth_chainId" });
@@ -117,8 +118,6 @@ export default function V2Withdrawal() {
   const [v1Withdrawing, setV1Withdrawing] = useState(false);
   const [daoVoting, setDaoVoting] = useState({ loading: false, visible: false, proposals: [], message: "" });
   const [votingProposalId, setVotingProposalId] = useState(null);
-  const [proposalIdInput, setProposalIdInput] = useState("");
-  const [voteSupport, setVoteSupport] = useState("1");
 
   const loadDaoVoting = useCallback(async () => {
     try {
@@ -332,6 +331,9 @@ export default function V2Withdrawal() {
   );
   const showDaoOnly = location.pathname === "/dao-voting";
   const showV2 = !showV1 && !showDaoOnly;
+  const availableDaoProposalIds = DAO_VOTING_PROPOSAL_IDS.filter((proposalId) =>
+    daoVoting.proposals.some((proposal) => proposal.id === proposalId && !proposal.hasVoted),
+  );
   const v1TotalClaimed = BigInt(v1Overview?.directClaimed ?? 0n)
     + BigInt(v1Overview?.selfClaimed ?? 0n)
     + BigInt(v1Overview?.levelClaimed ?? 0n)
@@ -428,20 +430,17 @@ export default function V2Withdrawal() {
     }
   };
 
-  const voteForProposal = async () => {
-    if (!/^\d+$/.test(proposalIdInput) || !/^[0-2]$/.test(voteSupport)) return;
+  const voteForProposal = async (proposalId) => {
     if (!window.ethereum) {
       return;
     }
     try {
-      const proposalId = BigInt(proposalIdInput);
-      const support = Number(voteSupport);
       setVotingProposalId(proposalId);
       await window.ethereum.request({ method: "eth_requestAccounts" });
       await ensureBscMainnet();
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
       const dao = new ethers.Contract(V2DaoAddress, DAO_ABI, signer);
-      const tx = await dao.castVote(proposalId, support);
+      const tx = await dao.castVote(proposalId, DAO_VOTE_FOR);
       await tx.wait();
       await loadDaoVoting();
     } catch {
@@ -516,41 +515,18 @@ export default function V2Withdrawal() {
       </div>
       </div>}
 
-      {(daoVoting.visible || showDaoOnly) && <div id="dao-voting" className="table-card" style={{ marginTop: "24px" }}>
-        <div className="withdrawal-grid">
-          <div className="withdrawal-card">
-            <p className="withdrawal-card-title">Proposal ID</p>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={proposalIdInput}
-              onChange={(event) => setProposalIdInput(event.target.value.replace(/\D/g, ""))}
-              placeholder="Proposal ID"
-              aria-label="Proposal ID"
-            />
-          </div>
-          <div className="withdrawal-card">
-            <p className="withdrawal-card-title">Support</p>
-            <input
-              type="number"
-              min="0"
-              max="2"
-              step="1"
-              value={voteSupport}
-              onChange={(event) => setVoteSupport(event.target.value.replace(/[^0-2]/g, ""))}
-              aria-label="Vote support"
-            />
-          </div>
-        </div>
-        <div className="withdraw-action-wrap">
-          <button
-            className="custom-button withdraw-btn"
-            onClick={voteForProposal}
-            disabled={votingProposalId !== null || !/^\d+$/.test(proposalIdInput) || !/^[0-2]$/.test(voteSupport)}
+      {(daoVoting.visible || showDaoOnly) && availableDaoProposalIds.length > 0 && <div id="dao-voting" className="table-card" style={{ marginTop: "24px" }}>
+        <p className="withdrawal-card-title mb-3">Proposal ID</p>
+        <div className="d-flex flex-wrap gap-2">
+          {availableDaoProposalIds.map((proposalId) => <button
+            key={proposalId.toString()}
+            type="button"
+            className="btn btn-outline-primary px-4"
+            onClick={() => voteForProposal(proposalId)}
+            disabled={votingProposalId !== null}
           >
-            {votingProposalId !== null ? "Voting..." : "Vote"}
-          </button>
+            {votingProposalId === proposalId ? "Voting..." : proposalId.toString()}
+          </button>)}
         </div>
       </div>}
 
