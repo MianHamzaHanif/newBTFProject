@@ -123,6 +123,9 @@ const App = () => {
           is not itself a V2 member. The screen performs its own V2 checks. */}
       <Route element={<DashboardLayout />}>
         <Route path="/migration-data" element={<MigrationData />} />
+        {/* DAO Voting also stays available to the migration authority, even
+            when that operational wallet is not a registered V2 member. */}
+        <Route path="/dao-voting" element={<Withdrawal />} />
       </Route>
       <Route element={<RequireV2Registration />}>
       <Route element={<DashboardLayout />}>

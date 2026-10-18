@@ -100,10 +100,6 @@ const RightSidebar = () => {
               <span className="price">{usdtPrice}</span>
             </div> */}
 
-            <button className="btn">
-              {/* <span className="mainText">Buy Token Now</span> */}
-              <span className="subText">COMING SOON</span>
-            </button>
           </div>
         </div>
       </div>

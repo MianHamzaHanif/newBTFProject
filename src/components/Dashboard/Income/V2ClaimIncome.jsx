@@ -57,6 +57,23 @@ async function ensureBscMainnet() {
   }
 }
 
+// Mobile wallets occasionally fail while ethers' BrowserProvider polls a
+// receipt, reporting the opaque "could not coalesce error" even though the
+// claim call itself is valid. Submit through the wallet's native JSON-RPC and
+// poll that same wallet RPC, matching the reliable package-buy flow.
+async function waitForWalletReceipt(transactionHash, timeoutMs = 90_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const receipt = await window.ethereum.request({
+      method: "eth_getTransactionReceipt",
+      params: [transactionHash],
+    });
+    if (receipt) return receipt;
+    await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+  }
+  return null;
+}
+
 export default function V2ClaimIncome() {
   const [rows, setRows] = useState([]);
   const [pendingMethod, setPendingMethod] = useState("");
@@ -154,6 +171,7 @@ export default function V2ClaimIncome() {
           return {
             sno: index + 1,
             incomeType: action.label,
+            readyAmount: currentAmount,
             current: formatAmount(currentAmount),
             claimed: formatAmount(claimedAmount),
             method: action.method
@@ -177,6 +195,11 @@ export default function V2ClaimIncome() {
   }, [loadClaimData]);
 
   const claim = async (method) => {
+    const row = rows.find((entry) => entry.method === method);
+    if (!row || BigInt(row.readyAmount ?? 0n) === 0n) {
+      setMessage(`No ${row?.incomeType || "income"} is ready to claim.`);
+      return;
+    }
     if (!window.ethereum) {
       setMessage("MetaMask or Trust Wallet is not available.");
       return;
@@ -185,19 +208,37 @@ export default function V2ClaimIncome() {
     try {
       setPendingMethod(method);
       setMessage("Please confirm the claim transaction in your wallet.");
-      await window.ethereum.request({ method: "eth_requestAccounts" });
+      let accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
       await ensureBscMainnet();
+      accounts = await window.ethereum.request({ method: "eth_accounts" });
+      const sender = accounts?.[0] || "";
+      if (!ethers.isAddress(sender)) throw new Error("Wallet account not available.");
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const packageManager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, signer);
-      const tx = await packageManager[method]();
-      await tx.wait();
+      const managerInterface = new ethers.Interface(V2PackageManagerABI);
+      const transactionHash = await window.ethereum.request({
+        method: "eth_sendTransaction",
+        params: [{
+          from: sender,
+          to: PackageManagerAddress,
+          data: managerInterface.encodeFunctionData(method),
+        }],
+      });
+      setMessage("Claim submitted. Waiting for confirmation...");
+      const receipt = await waitForWalletReceipt(transactionHash);
+      if (!receipt || Number(receipt.status) !== 1) {
+        setMessage("Claim is pending or failed. Check your wallet Activity, then refresh amounts.");
+        return;
+      }
       setMessage("Income claimed successfully and credited to the V2 ledger.");
       await loadClaimData();
       window.dispatchEvent(new Event("btf:v2-data-changed"));
     } catch (error) {
-      setMessage(error?.shortMessage || error?.reason || error?.message || "Claim failed.");
+      const rawMessage = error?.shortMessage || error?.reason || error?.message || "";
+      setMessage(
+        rawMessage.toLowerCase().includes("could not coalesce error")
+          ? "Wallet RPC rejected the claim request. Reconnect the wallet on BSC Mainnet and try again."
+          : rawMessage || "Claim failed.",
+      );
     } finally {
       setPendingMethod("");
     }
@@ -254,7 +295,11 @@ export default function V2ClaimIncome() {
                 <TableCell align="center">{row.current}</TableCell>
                 <TableCell align="center">{row.claimed}</TableCell>
                 <TableCell align="center">
-                  <button className="btn btn-primary btn-sm" disabled={Boolean(pendingMethod)} onClick={() => claim(row.method)}>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={Boolean(pendingMethod) || BigInt(row.readyAmount ?? 0n) === 0n}
+                    onClick={() => claim(row.method)}
+                  >
                     {pendingMethod === row.method ? "Claiming..." : "Claim"}
                   </button>
                 </TableCell>

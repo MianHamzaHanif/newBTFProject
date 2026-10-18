@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { useLocation } from "react-router-dom";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
-import { V2LedgerAddress } from "../../../blockchain/address";
+import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
+import { PackageManagerAddress, ReferralNetworkAddress, V2DaoAddress, V2LedgerAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import { hasImportedLegacyPackage } from "../../../blockchain/legacyPackageImportState";
+import { canAccessMigration } from "../../../blockchain/migrationAccess";
 
 const V1_MIN_WITHDRAWAL = 10n ** 19n; // 10 USDT, token has 18 decimals
 // UI-only policy: V2 withdrawals are enabled from 10 USDT. Keep a larger
@@ -27,6 +29,24 @@ const formatUsdt = (value) => {
 const formatTime = (value) => {
   const timestamp = Number(value ?? 0n);
   return timestamp ? new Date(timestamp * 1000).toLocaleString() : "-";
+};
+
+const withdrawErrorMessage = (error) => {
+  const revertData = error?.data ?? error?.info?.error?.data?.data;
+  if (typeof revertData === "string" && revertData.startsWith("0x08c379a0")) {
+    try {
+      const reason = ethers.AbiCoder.defaultAbiCoder().decode(
+        ["string"],
+        `0x${revertData.slice(10)}`,
+      )[0];
+      if (reason === "NO_BALANCE") return "No V2 income is credited to this connected wallet.";
+      if (reason === "MIN_WITHDRAW") return "Your credited V2 income is below the withdrawal minimum.";
+      return `V2 withdrawal was rejected: ${reason}.`;
+    } catch {
+      // Fall through to the provider's normal message below.
+    }
+  }
+  return error?.shortMessage || error?.reason || error?.message || "V2 withdrawal failed.";
 };
 
 const V1_MANAGER_ABI = [
@@ -51,6 +71,17 @@ const V1_REFERRAL_ABI = [
   "function getTotalLevelRoiClaimableFor(address) view returns(uint256)",
 ];
 const V1_RANK_MODULE_ABI = ["function rawClaimable(address) view returns(uint256)"];
+const DAO_ABI = [
+  "function proposalCount() view returns(uint256)",
+  "function getProposal(uint256) view returns(address proposer,address target,bytes data,uint256 snapshotTime,uint256 endTime,uint256 eta,uint256 forVotes,uint256 againstVotes,uint256 abstainVotes,bool canceled,bool executed)",
+  "function proposalQuorum(uint256) view returns(uint256)",
+  "function hasVoted(uint256,address) view returns(bool)",
+  "function castVote(uint256 proposalId,uint8 support)",
+];
+const REGISTRY_VOTING_ABI = [
+  "function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)",
+];
+const DAO_VOTE_FOR = 1;
 
 const ensureBscMainnet = async () => {
   const currentChain = await window.ethereum.request({ method: "eth_chainId" });
@@ -82,7 +113,86 @@ export default function V2Withdrawal() {
   const [v1Loading, setV1Loading] = useState(false);
   const [v1Message, setV1Message] = useState("");
   const [canWithdrawV1, setCanWithdrawV1] = useState(false);
+  const [hasActiveV2Package, setHasActiveV2Package] = useState(false);
   const [v1Withdrawing, setV1Withdrawing] = useState(false);
+  const [daoVoting, setDaoVoting] = useState({ loading: false, visible: false, proposals: [], message: "" });
+  const [votingProposalId, setVotingProposalId] = useState(null);
+  const [proposalIdInput, setProposalIdInput] = useState("");
+  const [voteSupport, setVoteSupport] = useState("1");
+
+  const loadDaoVoting = useCallback(async () => {
+    try {
+      setDaoVoting((current) => ({ ...current, loading: true, message: "" }));
+      const user = await getReadWalletAddress();
+      if (!user || !ethers.isAddress(user) || !ethers.isAddress(V2DaoAddress)) {
+        setDaoVoting({ loading: false, visible: false, proposals: [], message: "" });
+        return;
+      }
+
+      const provider = createBscReadProvider();
+      const dao = new ethers.Contract(V2DaoAddress, DAO_ABI, provider);
+      const registry = new ethers.Contract(ReferralNetworkAddress, REGISTRY_VOTING_ABI, provider);
+      const [proposalCount, latestBlock, isMigrationAuthority] = await Promise.all([
+        dao.proposalCount(),
+        provider.getBlock("latest"),
+        canAccessMigration(user),
+      ]);
+      const now = BigInt(latestBlock?.timestamp ?? 0);
+      // Governance currently has a small proposal history. Reading the most
+      // recent 50 keeps this section fast even after the DAO has grown.
+      const count = BigInt(proposalCount);
+      const toRead = Number(count > 50n ? 50n : count);
+      const proposalIds = Array.from(
+        { length: toRead },
+        (_, index) => count - BigInt(index),
+      );
+      const proposals = await Promise.all(proposalIds.map(async (proposalId) => {
+        const proposal = await dao.getProposal(proposalId);
+        const snapshotTime = BigInt(proposal[3]);
+        const endTime = BigInt(proposal[4]);
+        const eta = BigInt(proposal[5]);
+        const canceled = Boolean(proposal[9]);
+        const executed = Boolean(proposal[10]);
+        // Show only proposals which are still in their voting window. Queued
+        // and completed proposals cannot accept another vote.
+        if (canceled || executed || eta !== 0n || now > endTime) return null;
+
+        const [weight, hasVoted, quorum] = await Promise.all([
+          registry.getVotingPowerAt(user, snapshotTime),
+          dao.hasVoted(proposalId, user),
+          dao.proposalQuorum(proposalId),
+        ]);
+        if (BigInt(weight) === 0n) return null;
+        return {
+          id: proposalId,
+          endTime,
+          forVotes: BigInt(proposal[6]),
+          againstVotes: BigInt(proposal[7]),
+          abstainVotes: BigInt(proposal[8]),
+          quorum: BigInt(quorum),
+          weight: BigInt(weight),
+          hasVoted: Boolean(hasVoted),
+        };
+      }));
+      const eligibleProposals = proposals.filter(Boolean);
+      // Migration authority must be able to open this operational section as
+      // well. It can cast a vote only when the DAO snapshot gives that wallet
+      // voting weight; that remains enforced by the DAO contract itself.
+      setDaoVoting({
+        loading: false,
+        visible: isMigrationAuthority || eligibleProposals.length > 0,
+        proposals: eligibleProposals,
+        message: "",
+      });
+    } catch (error) {
+      setDaoVoting({
+        loading: false,
+        visible: false,
+        proposals: [],
+        message: error?.shortMessage || error?.message || "Could not load DAO voting data.",
+      });
+    }
+  }, []);
 
   const loadV1Overview = useCallback(async () => {
     try {
@@ -94,7 +204,13 @@ export default function V2Withdrawal() {
       const provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true });
       const manager = new ethers.Contract(V1_MAINNET.packageManager, V1_MANAGER_ABI, provider);
       const referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_REFERRAL_ABI, provider);
-      const v1User = await referral.users(user);
+      const [v1User, v2CurrentPackage] = await Promise.all([
+        referral.users(user),
+        new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider())
+          .currentPackage(user)
+          .catch(() => 0n),
+      ]);
+      setHasActiveV2Package(BigInt(v2CurrentPackage) > 0n);
       if (!Boolean(v1User?.exists ?? v1User?.[8])) {
         setCanWithdrawV1(false);
         setV1Overview(null);
@@ -151,6 +267,7 @@ export default function V2Withdrawal() {
       setV1Overview({ directClaimable, directClaimed, selfClaimable, selfClaimed, levelClaimable, levelClaimed, powerClaimable, powerCredited, powerClaimed, rewardClaimable, rewardClaimed, incomeLimit, totalClaimable: BigInt(directClaimable) + BigInt(selfClaimable) + BigInt(levelClaimable) + BigInt(powerClaimable) + BigInt(rewardClaimable) });
     } catch (error) {
       setCanWithdrawV1(false);
+      setHasActiveV2Package(false);
       setV1Overview(null);
       setV1Message(error?.shortMessage || error?.message || "Could not load V1 withdrawal overview.");
     } finally {
@@ -200,10 +317,11 @@ export default function V2Withdrawal() {
   useEffect(() => {
     load();
     loadV1Overview();
-  }, [load, loadV1Overview]);
+    loadDaoVoting();
+  }, [load, loadDaoVoting, loadV1Overview]);
 
   const refreshAll = async () => {
-    await Promise.all([load(), loadV1Overview()]);
+    await Promise.all([load(), loadV1Overview(), loadDaoVoting()]);
   };
   // Use distinct routes rather than URL hashes. NavLink only compares the
   // pathname for its active state, so hash-only links made both V1 and V2
@@ -212,7 +330,8 @@ export default function V2Withdrawal() {
   const showV1 = canWithdrawV1 && (
     location.pathname === "/withdrawal/v1" || location.hash === "#withdraw-v1"
   );
-  const showV2 = !showV1;
+  const showDaoOnly = location.pathname === "/dao-voting";
+  const showV2 = !showV1 && !showDaoOnly;
   const v1TotalClaimed = BigInt(v1Overview?.directClaimed ?? 0n)
     + BigInt(v1Overview?.selfClaimed ?? 0n)
     + BigInt(v1Overview?.levelClaimed ?? 0n)
@@ -220,7 +339,11 @@ export default function V2Withdrawal() {
     + BigInt(v1Overview?.rewardClaimed ?? 0n);
   const v1IncomeLimit = BigInt(v1Overview?.incomeLimit ?? 0n);
   const v1NinetyPercentLimit = (v1IncomeLimit * V1_WITHDRAWAL_CAP_BP) / 100n;
-  const v1NinetyPercentReached = v1IncomeLimit > 0n && v1TotalClaimed >= v1NinetyPercentLimit;
+  // A user with an active V2 package must not see the UI-only V1 90% block.
+  // Keep the existing limit/message for users who have no active V2 package.
+  const v1NinetyPercentReached = !hasActiveV2Package
+    && v1IncomeLimit > 0n
+    && v1TotalClaimed >= v1NinetyPercentLimit;
   const v1TotalClaimable = BigInt(v1Overview?.totalClaimable ?? 0n);
 
   const withdraw = async () => {
@@ -243,12 +366,31 @@ export default function V2Withdrawal() {
       await window.ethereum.request({ method: "eth_requestAccounts" });
       await ensureBscMainnet();
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
-      const tx = await new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, signer).withdrawAll();
+      const signerAddress = await signer.getAddress();
+      const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, signer);
+      // Always use the wallet that is actually signing, rather than a cached
+      // dashboard address. This prevents a stale/other-wallet balance from
+      // displaying as withdrawable and then producing an opaque RPC error.
+      const signerBalance = BigInt(await ledger.balanceOf(signerAddress));
+      setPending(signerBalance);
+      if (signerBalance === 0n) {
+        setMessage("No V2 income is credited to this connected wallet.");
+        return;
+      }
+      if (signerBalance < minimumWithdraw) {
+        setMessage(`Minimum V2 withdrawal is ${formatUsdt(minimumWithdraw)} USDT.`);
+        return;
+      }
+      // Surface a contract revert before opening the wallet's transaction
+      // confirmation. In particular, this converts ethers' coalesce error
+      // into the actual Ledger reason (NO_BALANCE/MIN_WITHDRAW).
+      await ledger.withdrawAll.staticCall();
+      const tx = await ledger.withdrawAll();
       await tx.wait();
       setMessage("V2 income withdrawn successfully.");
       await load();
     } catch (error) {
-      setMessage(error?.shortMessage || error?.reason || error?.message || "V2 withdrawal failed.");
+      setMessage(withdrawErrorMessage(error));
     } finally {
       setWithdrawing(false);
     }
@@ -283,6 +425,30 @@ export default function V2Withdrawal() {
       setV1Message(error?.shortMessage || error?.reason || error?.message || "V1 withdrawal failed.");
     } finally {
       setV1Withdrawing(false);
+    }
+  };
+
+  const voteForProposal = async () => {
+    if (!/^\d+$/.test(proposalIdInput) || !/^[0-2]$/.test(voteSupport)) return;
+    if (!window.ethereum) {
+      return;
+    }
+    try {
+      const proposalId = BigInt(proposalIdInput);
+      const support = Number(voteSupport);
+      setVotingProposalId(proposalId);
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      await ensureBscMainnet();
+      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+      const dao = new ethers.Contract(V2DaoAddress, DAO_ABI, signer);
+      const tx = await dao.castVote(proposalId, support);
+      await tx.wait();
+      await loadDaoVoting();
+    } catch {
+      // The wallet/provider displays the transaction rejection or contract
+      // revert. Keep this compact voting form free of extra status cards.
+    } finally {
+      setVotingProposalId(null);
     }
   };
 
@@ -348,6 +514,44 @@ export default function V2Withdrawal() {
         </button>
         {message ? <p className="team-loading withdraw-status">{message}</p> : null}
       </div>
+      </div>}
+
+      {(daoVoting.visible || showDaoOnly) && <div id="dao-voting" className="table-card" style={{ marginTop: "24px" }}>
+        <div className="withdrawal-grid">
+          <div className="withdrawal-card">
+            <p className="withdrawal-card-title">Proposal ID</p>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={proposalIdInput}
+              onChange={(event) => setProposalIdInput(event.target.value.replace(/\D/g, ""))}
+              placeholder="Proposal ID"
+              aria-label="Proposal ID"
+            />
+          </div>
+          <div className="withdrawal-card">
+            <p className="withdrawal-card-title">Support</p>
+            <input
+              type="number"
+              min="0"
+              max="2"
+              step="1"
+              value={voteSupport}
+              onChange={(event) => setVoteSupport(event.target.value.replace(/[^0-2]/g, ""))}
+              aria-label="Vote support"
+            />
+          </div>
+        </div>
+        <div className="withdraw-action-wrap">
+          <button
+            className="custom-button withdraw-btn"
+            onClick={voteForProposal}
+            disabled={votingProposalId !== null || !/^\d+$/.test(proposalIdInput) || !/^[0-2]$/.test(voteSupport)}
+          >
+            {votingProposalId !== null ? "Voting..." : "Vote"}
+          </button>
+        </div>
       </div>}
 
     </>

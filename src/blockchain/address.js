@@ -15,6 +15,9 @@ export const PackageManagerAddress = configuredAddress(import.meta.env.VITE_BTF_
 // Manager-proxy deployment block if event-history queries are enabled later.
 export const V2DeploymentBlock = import.meta.env.VITE_BTF_V2_DEPLOYMENT_BLOCK || "0";
 export const V2LedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V2_LEDGER_ADDRESS, "0x43FCBb62871738B62579bD2D04e13b9be7197abd");
+// DAO is kept configurable so a future governance deployment does not
+// require a source-code change in the dashboard.
+export const V2DaoAddress = configuredAddress(import.meta.env.VITE_BTF_V2_DAO_ADDRESS, "0xa680C357A19122bdcD493100f6218653B090daAE");
 export const V2FlushLedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V2_FLUSH_LEDGER_ADDRESS, "0xc23CE8Ab0B04f7876aeC33bA29F162b09e3Ff3B3");
 // Manual import is intentionally disabled: Mainnet uses verified V1 readers.
 export const V2ManualLegacyImporterAddress = configuredAddress(import.meta.env.VITE_BTF_V2_MANUAL_LEGACY_IMPORTER_ADDRESS);

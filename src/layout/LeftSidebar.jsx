@@ -2,13 +2,41 @@ import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import ReferralNetworkABI from "../blockchain/referralNetworkABI.json";
-import { ReferralNetworkAddress } from "../blockchain/address";
+import { ReferralNetworkAddress, V2DaoAddress } from "../blockchain/address";
 import { BSC_MAINNET } from "../blockchain/bscMainnetConfig";
-import { getReadWalletAddress } from "../blockchain/readProvider";
+import { createBscReadProvider, getReadWalletAddress } from "../blockchain/readProvider";
 import { canAccessMigration } from "../blockchain/migrationAccess";
 import { hasImportedLegacyPackage } from "../blockchain/legacyPackageImportState";
 import { V1_MAINNET } from "../blockchain/v1MainnetConfig";
 import user from "/dashboardimg/user.png";
+
+const DAO_VOTING_ABI = [
+  "function proposalCount() view returns(uint256)",
+  "function getProposal(uint256) view returns(address proposer,address target,bytes data,uint256 snapshotTime,uint256 endTime,uint256 eta,uint256 forVotes,uint256 againstVotes,uint256 abstainVotes,bool canceled,bool executed)",
+];
+const REGISTRY_VOTING_ABI = ["function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)"];
+
+const canAccessDaoVoting = async (address, isMigrationAuthority) => {
+  if (isMigrationAuthority) return true;
+  if (!ethers.isAddress(address) || !ethers.isAddress(V2DaoAddress)) return false;
+
+  const provider = createBscReadProvider();
+  const dao = new ethers.Contract(V2DaoAddress, DAO_VOTING_ABI, provider);
+  const registry = new ethers.Contract(ReferralNetworkAddress, REGISTRY_VOTING_ABI, provider);
+  const [proposalCount, block] = await Promise.all([dao.proposalCount(), provider.getBlock("latest")]);
+  const count = BigInt(proposalCount);
+  const now = BigInt(block?.timestamp ?? 0);
+  const toRead = Number(count > 50n ? 50n : count);
+  const proposalIds = Array.from({ length: toRead }, (_, index) => count - BigInt(index));
+  const results = await Promise.all(proposalIds.map(async (proposalId) => {
+    const proposal = await dao.getProposal(proposalId);
+    const isOpen = !Boolean(proposal[9]) && !Boolean(proposal[10])
+      && BigInt(proposal[5]) === 0n && now <= BigInt(proposal[4]);
+    if (!isOpen) return false;
+    return BigInt(await registry.getVotingPowerAt(address, proposal[3])) > 0n;
+  }));
+  return results.some(Boolean);
+};
 
 const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const navigate = useNavigate();
@@ -19,6 +47,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
   const [userId, setUserId] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [canViewMigration, setCanViewMigration] = useState(false);
+  const [canViewDaoVoting, setCanViewDaoVoting] = useState(false);
   const [hasV1Registration, setHasV1Registration] = useState(false);
   const [hasActiveV1Package, setHasActiveV1Package] = useState(false);
   const V1_USER_ABI = ["function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)"];
@@ -60,6 +89,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
         setSponsorAddress("");
         setCanViewMigration(false);
+        setCanViewDaoVoting(false);
         setHasV1Registration(false);
         setHasActiveV1Package(false);
         return;
@@ -84,7 +114,13 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
         setSponsorAddress("");
       }
-      setCanViewMigration(await canAccessMigration(address));
+      const migrationAccess = await canAccessMigration(address);
+      setCanViewMigration(migrationAccess);
+      try {
+        setCanViewDaoVoting(await canAccessDaoVoting(address, migrationAccess));
+      } catch {
+        setCanViewDaoVoting(migrationAccess);
+      }
       try {
         const v1Provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true });
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, v1Provider);
@@ -119,6 +155,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
         setSponsorAddress("");
         setCanViewMigration(false);
+        setCanViewDaoVoting(false);
         setHasV1Registration(false);
         setHasActiveV1Package(false);
         return;
@@ -143,7 +180,13 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
         setUserId("");
         setSponsorAddress("");
       }
-      setCanViewMigration(await canAccessMigration(address));
+      const migrationAccess = await canAccessMigration(address);
+      setCanViewMigration(migrationAccess);
+      try {
+        setCanViewDaoVoting(await canAccessDaoVoting(address, migrationAccess));
+      } catch {
+        setCanViewDaoVoting(migrationAccess);
+      }
       try {
         const v1Provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true });
         const v1 = new ethers.Contract(V1_MAINNET.referralNetwork, V1_USER_ABI, v1Provider);
@@ -191,7 +234,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
       return;
     }
 
-    if (path.startsWith("/withdrawal") || path === "/withdrawal-history") {
+    if (path.startsWith("/withdrawal") || path === "/withdrawal-history" || path === "/dao-voting") {
       setActiveDropdown("withdrawal");
       return;
     }
@@ -209,6 +252,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
     setSponsorAddress("");
     setUserId("");
     setCanViewMigration(false);
+    setCanViewDaoVoting(false);
     setHasV1Registration(false);
     setHasActiveV1Package(false);
     SetSidebarOpen(false);
@@ -439,6 +483,13 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
                 >
                   <p className="nav-item sub">Withdrawal History</p>
                 </NavLink>
+                {canViewDaoVoting && <NavLink
+                  to="/dao-voting"
+                  className="nav"
+                  onClick={handleNavItemClick}
+                >
+                  <p className="nav-item sub">DAO Voting</p>
+                </NavLink>}
               </div>
             )}
           </div>
