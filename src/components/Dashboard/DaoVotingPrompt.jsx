@@ -11,9 +11,8 @@ const DAO_ABI = [
   "function hasVoted(uint256,address) view returns(bool)",
 ];
 const REGISTRY_ABI = ["function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)"];
-// The live upgrade vote uses these four proposal IDs. Checking this concise
-// set keeps the Dashboard popup immediate after login/account switching.
-const LIVE_PROPOSAL_IDS = [18n, 19n, 20n, 21n];
+// Only the currently approved live proposal should trigger the voting prompt.
+const LIVE_PROPOSAL_IDS = [22n];
 
 export default function DaoVotingPrompt() {
   const navigate = useNavigate();

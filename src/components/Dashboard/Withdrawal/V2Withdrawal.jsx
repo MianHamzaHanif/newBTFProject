@@ -82,7 +82,7 @@ const REGISTRY_VOTING_ABI = [
   "function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)",
 ];
 const DAO_VOTE_FOR = 1;
-const DAO_VOTING_PROPOSAL_IDS = [18n, 19n, 20n, 21n];
+const DAO_VOTING_PROPOSAL_IDS = [22n];
 
 const ensureBscMainnet = async () => {
   const currentChain = await window.ethereum.request({ method: "eth_chainId" });

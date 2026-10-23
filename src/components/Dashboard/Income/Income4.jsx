@@ -34,6 +34,9 @@ const RANK_CHECKPOINT_READ_ABI = [
 const V1_POWER_MANAGER_ABI = [
   "function powerIncomeModule() view returns(address)",
   "function totalPowerIncomeClaimed(address) view returns(uint256)",
+  "function powerLastClaimAt(address) view returns(uint256)",
+  "function powerNextPayoutAt(address) view returns(uint256)",
+  "function oneDay() view returns(uint256)",
 ];
 const V1_POWER_MODULE_ABI = [
   "function activePowerLevel(address) view returns(uint256)",
@@ -73,6 +76,7 @@ export const Income4 = () => {
   const [loading, setLoading] = useState(false);
   const [legacyPower, setLegacyPower] = useState(null);
   const [v1Power, setV1Power] = useState(null);
+  const [powerRecovery, setPowerRecovery] = useState(null);
   const [nextPowerProgress, setNextPowerProgress] = useState({ level: 0, required: 0n, qualified: 0n });
 
   const loadPowerDetails = useCallback(async () => {
@@ -135,21 +139,28 @@ export const Income4 = () => {
         }),
       );
 
-      const [legacySchedule, legacyPreview] = await Promise.all([
+      const [legacySchedule, legacyPreview, recovery] = await Promise.all([
         checkpoint.getPowerSchedule(user),
         checkpoint.previewPowerClaimable(user),
+        // This selector becomes available when the Rank-facet proposal is
+        // executed. Keep the page compatible with the previous facet until
+        // then; an unsupported selector means no user has been finalized yet.
+        manager.getPowerIncomeRecovery(user).catch(() => null),
       ]);
-      // V1 is read independently. Its active rank is displayed alongside V2
-      // unless that same P-level already exists in V2 (V2 then wins).
+      // V1 is read independently. For a rank finalized in V1, this live V1
+      // record owns the baseline row while only higher ranks come from V2.
       const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, provider);
       const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, provider);
       const v1PowerRegistry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_POWER_REGISTRY_ABI, provider);
-      const [v1Level, v1ActivatedAt, v1ClaimedCount, v1Claimable, v1TotalClaimed] = await Promise.all([
+      const [v1Level, v1ActivatedAt, v1ClaimedCount, v1Claimable, v1TotalClaimed, v1LastClaimAt, v1NextPayoutAt, v1Day] = await Promise.all([
         v1PowerModule.activePowerLevel(user),
         v1PowerModule.powerLevelStartedAt(user),
         v1PowerModule.powerClaimedCount(user),
         v1PowerModule.rawClaimable(user),
         v1Manager.totalPowerIncomeClaimed(user),
+        v1Manager.powerLastClaimAt(user),
+        v1Manager.powerNextPayoutAt(user),
+        v1Manager.oneDay(),
       ]);
       // The lens only knows the Registry's V2 rank. A migrated V1/checkpoint
       // rank can be higher, so compute the next target from the highest rank
@@ -214,12 +225,21 @@ export const Income4 = () => {
         level: legacySchedule.level,
         claimableAmount: legacyPreview[1],
       } : null);
+      setPowerRecovery(recovery ? {
+        finalizedInV1: recovery.finalizedInV1,
+        baselineLevel: recovery.baselineLevel,
+        remainingDebt: recovery.remainingDebt,
+        totalRecovered: recovery.totalRecovered,
+      } : null);
       setV1Power(BigInt(v1Level) > 0n ? {
         level: v1Level,
         activatedAt: v1ActivatedAt,
         claimedCount: v1ClaimedCount,
         claimableAmount: v1Claimable,
         totalClaimed: v1TotalClaimed,
+        lastClaimAt: v1LastClaimAt,
+        nextPayoutAt: v1NextPayoutAt,
+        day: v1Day,
       } : null);
       setNextPowerProgress({
         level: nextPowerLevel,
@@ -238,6 +258,7 @@ export const Income4 = () => {
       setRegistryAchievementAt(0n);
       setLegacyPower(null);
       setV1Power(null);
+      setPowerRecovery(null);
       setNextPowerProgress({ level: 0, required: 0n, qualified: 0n });
       setMessage(error?.shortMessage || error?.message || "Could not load Power details");
     } finally {
@@ -251,24 +272,68 @@ export const Income4 = () => {
 
   const nativeActiveLevel = Number(details?.activeLevel ?? 0n);
   const nativeAchievedLevel = Number(details?.achievedLevel ?? 0n);
-  // A migrated checkpoint is V2 data too. Its rank takes precedence over a
-  // matching historical V1 P-level, just like a native V2 rank does.
+  const finalizedInV1 = Boolean(powerRecovery?.finalizedInV1);
+  const v1BaselineLevel = finalizedInV1 ? Number(powerRecovery?.baselineLevel ?? 0n) : 0;
+  const finalizedBaselineMatchesV1 = Boolean(
+    finalizedInV1 &&
+    v1Power &&
+    Number(v1Power.level) === v1BaselineLevel
+  );
+  const visibleLevelDetails = finalizedInV1
+    ? levelDetails.filter((item) => Number(item.level) > v1BaselineLevel)
+    : levelDetails;
+  // Before finalization a checkpoint is a V2-paid schedule and continues to
+  // take precedence. After finalization the matching baseline belongs to V1.
   const v2RankLevels = new Set([
-    ...levelDetails.map((item) => Number(item.level)),
-    ...(legacyPower ? [Number(legacyPower.level)] : []),
+    ...visibleLevelDetails.map((item) => Number(item.level)),
+    ...(!finalizedInV1 && legacyPower ? [Number(legacyPower.level)] : []),
   ].filter(Boolean));
-  const showV1Power = Boolean(v1Power && !v2RankLevels.has(Number(v1Power.level)));
-  const activeLevel = nativeActiveLevel || Number(legacyPower?.level ?? 0n) || Number(v1Power?.level ?? 0n);
-  const achievedLevel = nativeAchievedLevel || Number(legacyPower?.level ?? 0n) || Number(v1Power?.level ?? 0n);
+  const showV1Power = Boolean(
+    v1Power &&
+    (finalizedBaselineMatchesV1 || !v2RankLevels.has(Number(v1Power.level)))
+  );
+  const activeLevel = Math.max(
+    nativeActiveLevel,
+    finalizedInV1 ? 0 : Number(legacyPower?.level ?? 0n),
+    Number(v1Power?.level ?? 0n),
+  );
+  const achievedLevel = Math.max(
+    nativeAchievedLevel,
+    finalizedInV1 ? 0 : Number(legacyPower?.level ?? 0n),
+    Number(v1Power?.level ?? 0n),
+  );
+  const hasHigherV2Power = finalizedInV1 && nativeActiveLevel > v1BaselineLevel;
   const nextLevel = nextPowerProgress.level;
   const qualified = formatUsdt(nextPowerProgress.qualified);
   const required = formatUsdt(nextPowerProgress.required);
-  const powerTime = BigInt(legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt || BigInt(v1Power?.activatedAt ?? 0n);
+  const powerTime = finalizedBaselineMatchesV1 && !hasHigherV2Power
+    ? BigInt(v1Power?.activatedAt ?? 0n)
+    : BigInt(finalizedInV1 ? 0n : legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt || BigInt(v1Power?.activatedAt ?? 0n);
   const powerClaimable = BigInt(details?.claimableAmount ?? 0n)
-    + BigInt(legacyPower?.claimableAmount ?? 0n)
+    + BigInt(finalizedInV1 ? 0n : legacyPower?.claimableAmount ?? 0n)
     + (showV1Power ? BigInt(v1Power?.claimableAmount ?? 0n) : 0n);
-  const powerClaimed = BigInt(details?.totalClaimed ?? 0n)
-    + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n);
+  const visibleV2Claimed = visibleLevelDetails.reduce(
+    (total, item) => total + BigInt(item.claimedAmount ?? 0n),
+    0n,
+  );
+  const powerClaimed = finalizedInV1
+    ? visibleV2Claimed + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n)
+    : BigInt(details?.totalClaimed ?? 0n) + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n);
+  const displayedReleasedCount = finalizedBaselineMatchesV1 && !hasHigherV2Power
+    ? (() => {
+        const startedAt = BigInt(v1Power?.activatedAt ?? 0n);
+        const day = BigInt(v1Power?.day ?? 0n);
+        if (!startedAt || !day || powerTiming.now < startedAt) return Number(v1Power?.claimedCount ?? 0n);
+        const released = ((powerTiming.now - startedAt) / (10n * day)) + 1n;
+        return Number(released > 20n ? 20n : released);
+      })()
+    : Number(details?.releasedCount ?? 0n);
+  const displayedClaimedCount = finalizedBaselineMatchesV1 && !hasHigherV2Power
+    ? Number(v1Power?.claimedCount ?? 0n)
+    : Number(details?.claimedCount ?? 0n);
+  const displayedLastClaimAt = finalizedBaselineMatchesV1 && !hasHigherV2Power
+    ? v1Power?.lastClaimAt
+    : details?.lastClaimAt;
   const historyColumns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "level", label: "Power Level", sortable: true },
@@ -278,7 +343,7 @@ export const Income4 = () => {
     { id: "claimedAmount", label: "Claimed Amount", sortable: true },
     { id: "lastClaimAt", label: "Last Claim Time", sortable: true },
   ];
-  const v2HistoryRows = levelDetails.map((item) => {
+  const v2HistoryRows = visibleLevelDetails.map((item) => {
     const lastClaim = details?.lastClaimAt ?? 0n;
     let releasedCount = Number(item.releasedCount);
     if (item.level === activeLevel && item.activatedAt && powerTiming.now >= item.activatedAt) {
@@ -298,7 +363,7 @@ export const Income4 = () => {
     ...v2HistoryRows,
     // The rank checkpoint is stored and paid by V2. Keep it as a V2 row;
     // this prevents the old V1 P-level from appearing twice after migration.
-    ...(legacyPower && !v2HistoryRows.some((item) => item.level === `P${legacyPower.level}`) ? [{
+    ...(!finalizedInV1 && legacyPower && !v2HistoryRows.some((item) => item.level === `P${legacyPower.level}`) ? [{
       level: `P${legacyPower.level}`,
       activatedAt: formatTime(legacyPower.originalAchievedAt),
       releasedCount: `${legacyPower.paidInstallments} / 20`,
@@ -309,12 +374,14 @@ export const Income4 = () => {
     ...(showV1Power ? [{
       level: `P${v1Power.level}`,
       activatedAt: formatTime(v1Power.activatedAt),
-      releasedCount: `${v1Power.claimedCount} / 20`,
+      releasedCount: `${finalizedBaselineMatchesV1 ? displayedReleasedCount : v1Power.claimedCount} / 20`,
       claimedCount: Number(v1Power.claimedCount),
       claimedAmount: formatUsdt(v1Power.totalClaimed),
-      lastClaimAt: "V1 active record",
+      lastClaimAt: formatTime(v1Power.lastClaimAt),
     }] : []),
-  ].map((item, index) => ({ ...item, sno: index + 1 }));
+  ]
+    .sort((a, b) => Number(a.level.slice(1)) - Number(b.level.slice(1)))
+    .map((item, index) => ({ ...item, sno: index + 1 }));
 
   return (
     <div className="page-container">
@@ -333,10 +400,10 @@ export const Income4 = () => {
         {card(
           "Power Income Claimable",
           formatUsdt(powerClaimable),
-          `Released: ${Number(details?.releasedCount ?? 0n)} | Claimed: ${Number(details?.claimedCount ?? 0n)}`,
+          `Released: ${displayedReleasedCount} | Claimed: ${displayedClaimedCount}`,
         )}
-        {legacyPower ? card("V1 Pending Power (Migrated)", formatUsdt(legacyPower.claimableAmount), `P${legacyPower.level} | Paid: ${legacyPower.paidInstallments}`) : null}
-        {card("Power Last Claim At", formatTime(details?.lastClaimAt))}
+        {!finalizedInV1 && legacyPower ? card("V1 Pending Power (Migrated)", formatUsdt(legacyPower.claimableAmount), `P${legacyPower.level} | Paid: ${legacyPower.paidInstallments}`) : null}
+        {card("Power Last Claim At", formatTime(displayedLastClaimAt))}
         {card("Next Achieve Power", nextLevel ? `P${nextLevel}` : "Max achieved")}
         {card(
           "Next Achieve Power Business",
@@ -349,7 +416,13 @@ export const Income4 = () => {
           // override the payout date of the user's current native V2 rank
           // (for example active P3). Fall back to it only when no V2 Power
           // level is active.
-          formatTime(nativeActiveLevel ? details?.nextPayoutAt : legacyPower?.nextInstallmentAt ?? details?.nextPayoutAt),
+          formatTime(
+            finalizedBaselineMatchesV1 && !hasHigherV2Power
+              ? v1Power?.nextPayoutAt
+              : nativeActiveLevel
+                ? details?.nextPayoutAt
+                : legacyPower?.nextInstallmentAt ?? details?.nextPayoutAt
+          ),
         )}
       </div>
 

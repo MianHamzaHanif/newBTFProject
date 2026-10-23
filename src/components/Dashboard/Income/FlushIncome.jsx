@@ -63,11 +63,12 @@ export const FlushIncome = () => {
             referral.getUserWithdrawSummaryRecordAt(user, index),
             referral.getUserWithdrawSummaryFlushAt(user, index),
           ]);
-          return { summary, flush };
+          return { summary, flush, recordIndex: index };
         });
         const totals = [0n, 0n, 0n, 0n, 0n];
         const rows = [];
-        records.forEach(({ summary, flush }) => {
+        records.forEach(({ summary, flush, recordIndex }) => {
+          const timestamp = Number(summary.timestamp ?? summary[7] ?? 0n);
           for (let type = 0; type < labels.length; type += 1) {
             const amount = BigInt(flush[type] ?? 0n);
             if (amount === 0n) continue;
@@ -75,8 +76,11 @@ export const FlushIncome = () => {
             rows.push({
               source: "V1 (Legacy)",
               type: labels[type],
+              typeOrder: type,
               amount: formatAmount(amount),
-              time: formatTime(summary.timestamp ?? summary[7]),
+              timestamp,
+              time: formatTime(timestamp),
+              recordIndex,
             });
           }
         });
@@ -89,7 +93,10 @@ export const FlushIncome = () => {
           Promise.all(labels.map((_, type) => flushLedger.totalFlushedIncome(user, type))),
           flushLedger.getFlushHistoryLength(user),
         ]);
-        const records = await readInBatches(Number(historyLength), (index) => flushLedger.getFlushHistoryAt(user, index));
+        const records = await readInBatches(Number(historyLength), async (index) => ({
+          record: await flushLedger.getFlushHistoryAt(user, index),
+          recordIndex: index,
+        }));
         return { totals, records };
       };
 
@@ -104,13 +111,30 @@ export const FlushIncome = () => {
 
       setV1Summary(v1Snapshot.totals.map(formatAmount));
       setV2Summary(v2Snapshot.totals.map(formatAmount));
-      const v2Rows = v2Snapshot.records.map((record) => ({
-        source: "V2 (New)",
-        type: labels[Number(record.incomeType)] || "Unknown",
-        amount: formatAmount(record.amount),
-        time: formatTime(record.timestamp),
-      }));
-      setRows([...v1Snapshot.rows, ...v2Rows].map((row, index) => ({ ...row, sno: index + 1 })));
+      const v2Rows = v2Snapshot.records.map(({ record, recordIndex }) => {
+        const typeOrder = Number(record.incomeType);
+        const timestamp = Number(record.timestamp ?? 0n);
+        return {
+          source: "V2 (New)",
+          type: labels[typeOrder] || "Unknown",
+          typeOrder,
+          amount: formatAmount(record.amount),
+          timestamp,
+          time: formatTime(timestamp),
+          recordIndex,
+        };
+      });
+
+      const combinedRows = [...v1Snapshot.rows, ...v2Rows]
+        .sort((a, b) => {
+          if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+          if (a.recordIndex !== b.recordIndex) return b.recordIndex - a.recordIndex;
+          if (a.source !== b.source) return a.source === "V2 (New)" ? -1 : 1;
+          return a.typeOrder - b.typeOrder;
+        })
+        .map((row, index) => ({ ...row, sno: index + 1 }));
+
+      setRows(combinedRows);
     } catch (error) {
       setMessage(error?.shortMessage || error?.message || "Could not refresh Flush history. Please try Refresh again.");
     } finally {
@@ -124,7 +148,7 @@ export const FlushIncome = () => {
     { id: "sno", label: "S. No", sortable: true },
     { id: "type", label: "Income Type", sortable: true },
     { id: "amount", label: "Flushed Amount", sortable: true },
-    { id: "time", label: "Flush Time", sortable: true },
+    { id: "timestamp", label: "Flush Time", sortable: true },
   ];
 
   return (
