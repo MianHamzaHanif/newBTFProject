@@ -33,6 +33,13 @@ const VERIFIED_RANK_IMPORTER_ABI = ["function importVerifiedRanks(address user)"
 const MANAGER_LEGACY_RECOVERY_ABI = [
   "function setLegacyPendingLevelRoiBatch(address user,uint256[15] amounts)",
 ];
+const MANAGER_POWER_RECOVERY_ABI = [
+  "function finalizeLegacyPowerInV1(address user,uint256 recoveryDebt)",
+  "function legacyRankBaselineSet(address user) view returns(bool)",
+  "function legacyPowerBaselineLevel(address user) view returns(uint256)",
+  "function powerIncomeClaimedByLevel(address user,uint256 level) view returns(uint256)",
+  "function getPowerIncomeRecovery(address user) view returns(bool finalizedInV1,uint256 baselineLevel,uint256 remainingDebt,uint256 totalRecovered)",
+];
 const V1_RANK_MANAGER_ABI = [
   "function powerIncomeModule() view returns(address)",
   "function rewardIncomeModule() view returns(address)",
@@ -79,6 +86,11 @@ const V2_LEDGER_MIGRATION_ABI = [
 ];
 const NEXT_USER_SCAN_BATCH_SIZE = 10;
 const NEAR_LIMIT_THRESHOLD = 10n * 10n ** 18n;
+const POWER_RECOVERY_CASES = [
+  { wallet: "0x6673Cb68dd4EFc66A82Dc5dEf0234033cE0E862a", level: "P1", amount: "75" },
+  { wallet: "0x340175dA3dAC792f372f8E7EB7Edf47CAdb96c4C", level: "P1", amount: "25" },
+  { wallet: "0x7Bf33d13d8819D9A5BA5E6a5890ACa49Cc18cFA9", level: "P2", amount: "50" },
+];
 // Tree registration is complete/not required for this deployment. Keep the
 // implementation available for a future controlled migration, but hide it
 // from the operational UI.
@@ -117,6 +129,15 @@ const formatUsdt = (value) => {
     const [whole, decimals = ""] = ethers.formatUnits(value ?? 0n, 18).split(".");
     return `${whole}.${(decimals + "0000").slice(0, 4)}`;
   } catch { return "0.0000"; }
+};
+
+const recoveryWeiPreview = (value) => {
+  try {
+    const amount = String(value || "").trim();
+    return amount && /^\d+(\.\d{1,18})?$/.test(amount)
+      ? ethers.parseUnits(amount, 18).toString()
+      : "—";
+  } catch { return "—"; }
 };
 
 async function ensureBscMainnet() {
@@ -180,6 +201,10 @@ export default function MigrationData() {
   const [refreshingNearLimitUsers, setRefreshingNearLimitUsers] = useState(false);
   const [nearLimitUsersError, setNearLimitUsersError] = useState("");
   const [nearLimitUsersScanned, setNearLimitUsersScanned] = useState(0);
+  const [powerRecovery, setPowerRecovery] = useState({ user: "", amount: "" });
+  const [powerRecoverySubmitting, setPowerRecoverySubmitting] = useState(false);
+  const [powerRecoveryMessage, setPowerRecoveryMessage] = useState("");
+  const [powerRecoveryCompleted, setPowerRecoveryCompleted] = useState({});
   const verifiedPackageImport = ethers.isAddress(V2VerifiedLegacyImporterAddress) && V2VerifiedLegacyImporterAddress !== ethers.ZeroAddress;
   const verifiedRankImport = ethers.isAddress(V2VerifiedLegacyRankImporterAddress) && V2VerifiedLegacyRankImporterAddress !== ethers.ZeroAddress;
 
@@ -866,6 +891,89 @@ export default function MigrationData() {
     }
   };
 
+  const loadPowerRecoveryCase = (entry) => {
+    setPowerRecovery({ user: entry.wallet, amount: entry.amount });
+    setPowerRecoveryMessage(`${entry.wallet} loaded with verified ${entry.amount} USDT recovery debt.`);
+  };
+
+  const copyPowerRecoveryAddress = async (wallet) => {
+    setPowerRecovery((current) => ({ ...current, user: wallet }));
+    try {
+      await navigator.clipboard.writeText(wallet);
+      setPowerRecoveryMessage("Wallet address copied and loaded into the recovery form.");
+    } catch {
+      setPowerRecoveryMessage("Wallet address loaded into the recovery form.");
+    }
+  };
+
+  const finalizeLegacyPowerRecovery = async () => {
+    try {
+      if (!window.ethereum) throw new Error("MetaMask or Trust Wallet is not available.");
+      const beneficiary = resolvedWalletAddress(powerRecovery.user);
+      const amountText = String(powerRecovery.amount || "").trim();
+      if (!/^\d+(\.\d{1,18})?$/.test(amountText)) throw new Error("Enter a valid recovery amount in USDT.");
+
+      const verifiedCase = POWER_RECOVERY_CASES.find(
+        (entry) => entry.wallet.toLowerCase() === beneficiary.toLowerCase(),
+      );
+      if (!verifiedCase) throw new Error("This wallet is not in the verified Power recovery list.");
+
+      const recoveryDebt = ethers.parseUnits(amountText, 18);
+      const verifiedDebt = ethers.parseUnits(verifiedCase.amount, 18);
+      if (recoveryDebt !== verifiedDebt) {
+        throw new Error(`Verified recovery amount for this wallet is ${verifiedCase.amount} USDT.`);
+      }
+
+      setPowerRecoverySubmitting(true);
+      setPowerRecoveryMessage("Checking migration authority and on-chain Power state...");
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      await ensureBscMainnet();
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const caller = await signer.getAddress();
+      const registry = new ethers.Contract(ReferralNetworkAddress, V2_STRUCTURE_MIGRATION_ABI, provider);
+
+      if (!await registry.isMigrationAuthority(caller)) {
+        throw new Error("Connected wallet is not an authorised V2 migration operator.");
+      }
+      if (!await registry.migrated(beneficiary)) {
+        throw new Error("This beneficiary has not been migrated to V2.");
+      }
+
+      const manager = new ethers.Contract(PackageManagerAddress, MANAGER_POWER_RECOVERY_ABI, signer);
+      const [baselineSet, baselineLevel, recovery] = await Promise.all([
+        manager.legacyRankBaselineSet(beneficiary),
+        manager.legacyPowerBaselineLevel(beneficiary),
+        manager.getPowerIncomeRecovery(beneficiary),
+      ]);
+      if (!baselineSet || baselineLevel === 0n) throw new Error("Imported V1 Power baseline is not set for this user.");
+      if (recovery.finalizedInV1 ?? recovery[0]) throw new Error("This user's V1 Power recovery is already finalized.");
+
+      const claimedAtBaseline = await manager.powerIncomeClaimedByLevel(beneficiary, baselineLevel);
+      if (recoveryDebt > claimedAtBaseline) {
+        throw new Error(`Recovery cannot exceed ${ethers.formatUnits(claimedAtBaseline, 18)} USDT claimed at ${verifiedCase.level}.`);
+      }
+
+      // Preflight catches pending/carried Power balances and every other
+      // contract guard before the wallet is asked to broadcast the call.
+      await manager.finalizeLegacyPowerInV1.staticCall(beneficiary, recoveryDebt);
+      setPowerRecoveryMessage(`Confirm ${verifiedCase.amount} USDT Power recovery for ${beneficiary} in your wallet.`);
+      const tx = await manager.finalizeLegacyPowerInV1(beneficiary, recoveryDebt);
+      setPowerRecoveryMessage(`Transaction submitted: ${tx.hash}. Waiting for confirmation...`);
+      await tx.wait();
+      setPowerRecoveryCompleted((current) => ({ ...current, [beneficiary.toLowerCase()]: true }));
+      setPowerRecoveryMessage(`Power recovery finalized successfully. ${verifiedCase.amount} USDT will be recovered from this user's future higher-level Power income.`);
+      window.dispatchEvent(new Event("btf:v2-data-changed"));
+    } catch (error) {
+      const rawMessage = error?.shortMessage || error?.reason || error?.message || "Power recovery transaction failed.";
+      setPowerRecoveryMessage(/SELECTOR/i.test(rawMessage)
+        ? "Power recovery facet is not active on the Manager proxy yet. Execute the DAO upgrade proposal first."
+        : rawMessage);
+    } finally {
+      setPowerRecoverySubmitting(false);
+    }
+  };
+
   if (!accessChecked) return <div className="page-container migration-page"><div className="migration-form-shell"><p className="migration-panel-note">Checking migration access...</p></div></div>;
   if (!canViewMigration) return <div className="page-container migration-page"><div className="migration-form-shell"><div className="migration-form-heading"><div className="migration-form-icon"><i className="bi bi-shield-lock" /></div><div><h1>Migration Access Restricted</h1><p>Only the V2 Registry owner, a wallet with <code>migrationOperator = true</code>, or an approved migrated-wallet viewer can view Migration Data.</p></div></div></div></div>;
 
@@ -959,6 +1067,38 @@ export default function MigrationData() {
           <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.id}</TableCell><TableCell align="center" className="team-address-cell">{row.wallet}</TableCell><TableCell align="center">{row.incomeLimitDisplay} USDT</TableCell><TableCell align="center">{row.usedIncomeDisplay} USDT</TableCell><TableCell align="center">{row.remainingIncomeDisplay} USDT</TableCell><TableCell align="center">{row.levelBusiness}</TableCell><TableCell align="center">{row.levelRoi}</TableCell>
         </>}
       />
+    </div>
+    <div className="migration-level-panel migration-power-recovery-panel">
+      <div className="migration-section-title"><span>8</span> V2 Extra Power Income Recovery</div>
+      <p className="migration-panel-note">These verified users received their imported V1 Power baseline from V2 while that Power schedule remained in V1. Select a row to load the exact wallet and recovery amount. The amount is converted from USDT to 18-decimal wei automatically before the Manager call.</p>
+      <CustomTable
+        columns={[
+          { id: "wallet", label: "User Wallet", sortable: true },
+          { id: "level", label: "Level", sortable: true },
+          { id: "amount", label: "V2 Extra Amount", sortable: true },
+          { id: "status", label: "Status", sortable: false },
+          { id: "action", label: "Action", sortable: false },
+        ]}
+        rows={POWER_RECOVERY_CASES.map((entry) => ({
+          ...entry,
+          status: powerRecoveryCompleted[entry.wallet.toLowerCase()] ? "Finalized" : "Ready",
+        }))}
+        renderRow={(row) => <>
+          <TableCell align="center"><button type="button" className="migration-copy-address" onClick={() => copyPowerRecoveryAddress(row.wallet)} title="Copy and load wallet address">{row.wallet}<i className="bi bi-copy" /></button></TableCell>
+          <TableCell align="center"><span className="migration-power-level-badge">{row.level}</span></TableCell>
+          <TableCell align="center"><strong className="migration-recovery-amount">{row.amount} USDT</strong></TableCell>
+          <TableCell align="center"><span className={`migration-recovery-status ${row.status === "Finalized" ? "is-finalized" : ""}`}>{row.status}</span></TableCell>
+          <TableCell align="center"><button type="button" className="migration-table-action" onClick={() => loadPowerRecoveryCase(row)} disabled={powerRecoverySubmitting || row.status === "Finalized"}>{row.status === "Finalized" ? "Completed" : "Use Details"}</button></TableCell>
+        </>}
+      />
+      <div className="migration-recovery-form">
+        <Field label="Recovery User Wallet" value={powerRecovery.user} onChange={(value) => setPowerRecovery((current) => ({ ...current, user: normalizeWalletAddress(value) }))} placeholder="0x..." />
+        <Field label="Verified Recovery Amount" suffix="USDT" value={powerRecovery.amount} onChange={(value) => setPowerRecovery((current) => ({ ...current, amount: value.replace(/[^0-9.]/g, "") }))} placeholder="25, 50 or 75" />
+        <div className="migration-recovery-wei"><span>Contract recoveryDebt</span><code>{recoveryWeiPreview(powerRecovery.amount)} wei</code></div>
+      </div>
+      <div className="migration-recovery-warning"><i className="bi bi-shield-check" /><span>This is a permanent one-way action. It stops the imported baseline Power schedule in V2 and deducts the entered debt from future higher-level Power income.</span></div>
+      <div className="migration-actions"><button type="button" className="migration-primary-button" onClick={finalizeLegacyPowerRecovery} disabled={powerRecoverySubmitting || !powerRecovery.user || !powerRecovery.amount}>{powerRecoverySubmitting ? "Processing Recovery..." : "Finalize V1 Power & Set Recovery"}<i className="bi bi-shield-check" /></button></div>
+      {powerRecoveryMessage && <div className="migration-message">{powerRecoveryMessage}</div>}
     </div>
     {message && <div className="migration-message">{message}</div>}
   </div></div>;

@@ -24,6 +24,7 @@ export default [
   "function powerIncomeClaimedByLevel(address user,uint256 level) view returns (uint256)",
   "function powerPayoutClaimedCountByLevel(address user,uint256 level) view returns (uint256)",
   "function getPowerIncomeRecovery(address user) view returns (bool finalizedInV1,uint256 baselineLevel,uint256 remainingDebt,uint256 totalRecovered)",
+  "function finalizeLegacyPowerInV1(address user,uint256 recoveryDebt)",
   "function getIncomeReady(address user,uint8 incomeType) view returns (uint256 readyAmount)",
   "function getPackageHistoryLength(address user) view returns (uint256)",
   "function getPackageHistoryAt(address user,uint256 index) view returns (uint256 amount,uint256 purchasedAt,uint256 deactivatedAt,uint256 roiGenerated,uint256 roiMaximum,bool active)",
