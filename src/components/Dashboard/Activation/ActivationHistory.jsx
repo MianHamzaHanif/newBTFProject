@@ -1,3 +1,4 @@
+import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
@@ -88,7 +89,7 @@ export const ActivationHistory = () => {
             ]);
             const length = Number(lengthRaw);
             return readInBatches(length, async (index) => {
-              const record = await v2Manager.getPackageHistoryAt(walletAddress, index);
+              const record = await readPackageHistory(v2Manager, walletAddress, index);
               const generated = record.roiGenerated ?? record[3];
               const maximum = record.roiMaximum ?? record[4];
               const active = record.active ?? record[5];

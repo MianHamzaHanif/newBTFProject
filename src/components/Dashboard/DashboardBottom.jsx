@@ -1,3 +1,4 @@
+import { readPackageHistory } from "../../blockchain/packageHistory";
 import React, { useEffect, useState } from "react";
 import img1 from "/icon/icon-7.png";
 import img2 from "/icon/icon-8.png";
@@ -220,7 +221,7 @@ const DashboardBottom = () => {
         );
         const v2PackageRecordsPromise = Promise.all(
           Array.from({ length: Number(packageHistoryLengthRaw) }, async (_, index) => {
-            const record = await v2Manager.getPackageHistoryAt(walletAddress, index);
+            const record = await readPackageHistory(v2Manager, walletAddress, index);
             return {
               amount: BigInt(record.amount ?? record[0] ?? 0n),
               timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),

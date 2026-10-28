@@ -1,3 +1,4 @@
+import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
 import React, { useEffect, useRef, useState } from "react";
 import CustomTable from "../CommonComponents/CustomTable";
@@ -153,7 +154,7 @@ export const MyTeam = () => {
     const v2Length = v2Result.status === "fulfilled" ? Number(v2Result.value ?? 0n) : 0;
     const [v1StakesResult, v2PackagesResult] = await Promise.allSettled([
       readInBatches(Array.from({ length: v1Length }, (_, index) => index), (index) => v1Manager.userStakeHistory(address, index)),
-      readInBatches(Array.from({ length: v2Length }, (_, index) => index), (index) => v2Manager.getPackageHistoryAt(address, index)),
+      readInBatches(Array.from({ length: v2Length }, (_, index) => index), (index) => readPackageHistory(v2Manager, address, index)),
     ]);
     // A missing V2 package record must not hide the user's complete V1 team
     // row (and vice versa). Retain whichever history source answered.
@@ -219,7 +220,7 @@ export const MyTeam = () => {
       const levelIndex = selectedLevel - 1;
 
       for (let index = 0; index < packageLength; index += 1) {
-        const stakeData = await packageManager.getPackageHistoryAt(downlineAddress, index);
+        const stakeData = await readPackageHistory(packageManager, downlineAddress, index);
         let roiRaw = 0n;
 
         try {

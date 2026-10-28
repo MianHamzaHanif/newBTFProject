@@ -1,3 +1,4 @@
+import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
@@ -46,7 +47,7 @@ const combinedPackageTotal = async (address, v1Manager, v2Manager) => {
   ]);
   const [v1Stakes, v2Packages] = await Promise.all([
     readInBatches(Array.from({ length: Number(v1LengthRaw) }, (_, index) => index), (index) => v1Manager.userStakeHistory(address, index), 4),
-    readInBatches(Array.from({ length: Number(v2LengthRaw) }, (_, index) => index), (index) => v2Manager.getPackageHistoryAt(address, index), 4),
+    readInBatches(Array.from({ length: Number(v2LengthRaw) }, (_, index) => index), (index) => readPackageHistory(v2Manager, address, index), 4),
   ]);
   const legacyKeys = new Map();
   const v1Total = v1Stakes.reduce((total, stake) => {

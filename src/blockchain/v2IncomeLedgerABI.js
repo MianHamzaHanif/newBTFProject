@@ -8,5 +8,5 @@ export default [
   "function getUserIncomeHistoryLengthByType(address user,uint8 incomeType) view returns (uint256)",
   "function getUserIncomeHistoryAtByType(address user,uint8 incomeType,uint256 index) view returns (uint8 level,uint256 amount,uint256 timestamp)",
   "function getUserWithdrawHistoryLength(address user) view returns (uint256)",
-  "function getUserWithdrawHistoryAt(address user,uint256 index) view returns (uint256 amount,uint256 timestamp)"
+  "function getUserWithdrawHistoryAt(address user,uint256 index) view returns (uint256 grossAmount,uint256 feeAmount,uint256 netAmount,uint256 timestamp)"
 ];

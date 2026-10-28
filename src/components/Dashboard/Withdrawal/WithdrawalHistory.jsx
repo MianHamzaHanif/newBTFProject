@@ -48,21 +48,11 @@ export const WithdrawalHistory = () => {
       const walletAddress = await getReadWalletAddress();
       if (!ethers.isAddress(walletAddress)) throw new Error("Please connect wallet to view withdrawal history.");
 
-      const v1Referral = new ethers.Contract(
-        V1_MAINNET.referralNetwork,
-        ReferralNetworkABI,
-        new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl)
-      );
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, createBscReadProvider());
 
-      const [v1LengthRaw, v2LengthRaw] = await Promise.all([
-        v1Referral.getUserWithdrawSummaryRecordsLength(walletAddress),
-        v2Ledger.getUserWithdrawHistoryLength(walletAddress),
-      ]);
-      const [v1Records, v2Records] = await Promise.all([
-        readInBatches(Number(v1LengthRaw), (index) => v1Referral.getUserWithdrawSummaryRecordAt(walletAddress, index)),
-        readInBatches(Number(v2LengthRaw), (index) => v2Ledger.getUserWithdrawHistoryAt(walletAddress, index)),
-      ]);
+      const v2LengthRaw = await v2Ledger.getUserWithdrawHistoryLength(walletAddress);
+      const v1Records = [];
+      const v2Records = await readInBatches(Number(v2LengthRaw), (index) => v2Ledger.getUserWithdrawHistoryAt(walletAddress, index));
 
       const legacyRows = v1Records.map((record) => {
         const total = BigInt(record.usdAmount ?? record[6] ?? 0n);
@@ -81,8 +71,8 @@ export const WithdrawalHistory = () => {
         };
       }).filter((row) => row.rawTotal > 0n);
       const newRows = v2Records.map((record) => {
-        const total = BigInt(record.amount ?? record[0] ?? 0n);
-        const timestamp = BigInt(record.timestamp ?? record[1] ?? 0n);
+        const total = BigInt(record.netAmount ?? record[2] ?? 0n);
+        const timestamp = BigInt(record.timestamp ?? record[3] ?? 0n);
         return {
           source: "V2 (New)",
           direct: "-",

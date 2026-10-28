@@ -27,6 +27,7 @@ export default [
   "function finalizeLegacyPowerInV1(address user,uint256 recoveryDebt)",
   "function getIncomeReady(address user,uint8 incomeType) view returns (uint256 readyAmount)",
   "function getPackageHistoryLength(address user) view returns (uint256)",
+  "function packageHistory(address user,uint256 index) view returns (uint256 amount,uint256 purchasedAt,uint256 deactivatedAt,uint256 selfRoiMaximum)",
   "function getPackageHistoryAt(address user,uint256 index) view returns (uint256 amount,uint256 purchasedAt,uint256 deactivatedAt,uint256 roiGenerated,uint256 roiMaximum,bool active)",
   "function ROI_DAY() view returns (uint256)",
   "function roiStartTime() view returns (uint256)",

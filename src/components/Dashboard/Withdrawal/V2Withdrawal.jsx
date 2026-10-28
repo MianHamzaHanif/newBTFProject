@@ -11,10 +11,9 @@ import { hasImportedLegacyPackage } from "../../../blockchain/legacyPackageImpor
 import { canAccessMigration } from "../../../blockchain/migrationAccess";
 
 const V1_MIN_WITHDRAWAL = 10n ** 19n; // 10 USDT, token has 18 decimals
-// UI-only policy: V2 withdrawals are enabled from 10 USDT. Keep a larger
-// on-chain minimum if the Ledger is configured with one, but never lower the
-// UI guard below 10 USDT.
-const V2_UI_MIN_WITHDRAWAL = 10n ** 19n;
+// Match the deployed Ledger's 1-token minimum, while respecting any higher
+// on-chain value configured later.
+const V2_UI_MIN_WITHDRAWAL = 10n ** 18n;
 const V1_WITHDRAWAL_CAP_BP = 90n;
 
 const formatUsdt = (value) => {
@@ -82,7 +81,7 @@ const REGISTRY_VOTING_ABI = [
   "function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)",
 ];
 const DAO_VOTE_FOR = 1;
-const DAO_VOTING_PROPOSAL_IDS = [22n];
+const DAO_VOTING_PROPOSAL_IDS = [23n];
 
 const ensureBscMainnet = async () => {
   const currentChain = await window.ethereum.request({ method: "eth_chainId" });
@@ -195,6 +194,9 @@ export default function V2Withdrawal() {
   }, []);
 
   const loadV1Overview = useCallback(async () => {
+    setCanWithdrawV1(false);
+    setV1Overview(null);
+    return;
     try {
       setV1Loading(true);
       setV1Message("");
@@ -293,7 +295,7 @@ export default function V2Withdrawal() {
           const entries = await Promise.all(
             Array.from({ length: Number(length) }, (_, index) => ledger.getUserWithdrawHistoryAt(user, index)),
           );
-          return entries.reduce((sum, item) => sum + (item.amount ?? item[0] ?? 0n), 0n);
+          return entries.reduce((sum, item) => sum + (item.netAmount ?? item[2] ?? 0n), 0n);
         })
         .catch(() => 0n);
 

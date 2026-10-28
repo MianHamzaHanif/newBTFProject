@@ -1,3 +1,4 @@
+import { readPackageHistory } from "../../blockchain/packageHistory";
 import React, { useCallback, useEffect, useState } from "react";
 import "./style.css";
 import circleimg from "/dashboardimg/dashboard-img.png";
@@ -204,6 +205,24 @@ const DashboardTop = () => {
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
       const v2Lens = new ethers.Contract(await v2Manager.incomeReadyLens(), V2PackageManagerABI, v2Provider);
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
+      {
+      const [currentPackage, limit, used, selfReady, roiDay, startTime, block] = await Promise.all([
+        v2Manager.currentPackage(wallet), v2Manager.totalIncomeLimit(wallet),
+        v2Manager.totalIncomeUsed(wallet), v2Lens.getIncomeReady(wallet, 1),
+        v2Manager.ROI_DAY(), v2Manager.roiStartTime(), v2Provider.getBlock("latest"),
+      ]);
+      const elapsed = Math.max(0, Number(block.timestamp) - Number(startTime));
+      const cycleProgress = Number(roiDay) ? elapsed % Number(roiDay) : 0;
+      setPlanActivity({
+        progressText: limit > 0n ? `${toPercent2(used, limit)}% / 100%` : "0% / 100%",
+        activeStakeLabel: currentPackage > 0n
+          ? `Active package: ${formatEther2(currentPackage)} USDT`
+          : "No active package",
+        selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfReady)} USDT`,
+        remainingSeconds: Number(roiDay) ? Number(roiDay) - cycleProgress : 0,
+      });
+      return;
+      }
 
       // Plan progress follows the migration view, not a single active package:
       //   V1 gross withdrawn (net + fee) + V1 wallet balance
@@ -263,7 +282,7 @@ const DashboardTop = () => {
         Promise.all(Array.from(
           { length: Number(v2PackageHistoryLengthRaw ?? 0n) },
           async (_, index) => {
-            const record = await v2Manager.getPackageHistoryAt(wallet, index);
+            const record = await readPackageHistory(v2Manager, wallet, index);
             return {
               amount: BigInt(record.amount ?? record[0] ?? 0n),
               timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),
@@ -352,7 +371,7 @@ const DashboardTop = () => {
       const packageHistory = await Promise.all(
         Array.from(
           { length: Number(packageHistoryLength) },
-          (_, index) => v2Manager.getPackageHistoryAt(wallet, index),
+          (_, index) => readPackageHistory(v2Manager, wallet, index),
         ),
       );
       const activeIncomeLimit = packageHistory.reduce(
@@ -505,7 +524,7 @@ const DashboardTop = () => {
       const packageHistory = await Promise.all(
         Array.from(
           { length: historyLength },
-          (_, index) => v2WarningManager.getPackageHistoryAt(wallet, index),
+          (_, index) => readPackageHistory(v2WarningManager, wallet, index),
         ),
       );
       const activeIncomeLimit = packageHistory.reduce(
@@ -556,7 +575,7 @@ const DashboardTop = () => {
       // totalIncomeLimit/Used to zero. Read the last history row so the user
       // still sees that their previous package completed and is now inactive.
       if (incomeLimit === 0n && historyLength > 0) {
-        const lastPackage = await v2WarningManager.getPackageHistoryAt(wallet, historyLength - 1);
+        const lastPackage = await readPackageHistory(v2WarningManager, wallet, historyLength - 1);
         const deactivatedAt = BigInt(lastPackage.deactivatedAt ?? lastPackage[2] ?? 0n);
         if (deactivatedAt !== 0n) {
           setPackageWarnings([{
@@ -882,7 +901,7 @@ const DashboardTop = () => {
       const rawMessage = error?.shortMessage || error?.reason || error?.message || "";
       setBuyStatus(
         rawMessage.toLowerCase().includes("could not coalesce error")
-          ? "Wallet/RPC rejected the request. Please reconnect the wallet on BSC Mainnet and try again."
+          ? "Wallet/RPC rejected the request. Please reconnect the wallet on BSC Testnet and try again."
           : rawMessage || "Buy failed.",
       );
     } finally {

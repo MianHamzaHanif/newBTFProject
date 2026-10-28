@@ -1,17 +1,16 @@
-// BNB Smart Chain Mainnet network configuration used by all V2 reads and
-// wallet transactions.
+// This copied UI targets the new BSC Testnet deployment only.
 export const BSC_MAINNET = {
-  chainId: 56,
-  chainIdHex: "0x38",
-  chainName: "BNB Smart Chain",
+  chainId: 97,
+  chainIdHex: "0x61",
+  chainName: "BNB Smart Chain Testnet",
   rpcUrls: [
-    "https://bsc-dataseed.bnbchain.org",
-    "https://bsc-rpc.publicnode.com",
+    "https://bsc-testnet-rpc.publicnode.com",
+    "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
   ],
-  blockExplorerUrls: ["https://bscscan.com"],
+  blockExplorerUrls: ["https://testnet.bscscan.com"],
   nativeCurrency: {
-    name: "BNB",
-    symbol: "BNB",
+    name: "Test BNB",
+    symbol: "tBNB",
     decimals: 18,
   },
 };

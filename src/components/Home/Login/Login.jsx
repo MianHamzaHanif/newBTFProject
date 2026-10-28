@@ -56,7 +56,7 @@ const Login = () => {
     }
     const selectedChain = await window.ethereum.request({ method: "eth_chainId" });
     if (BigInt(selectedChain) !== BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) {
-      throw new Error("Please select BSC Mainnet in your wallet and try again.");
+      throw new Error("Please select BSC Testnet in your wallet and try again.");
     }
   };
 
@@ -82,7 +82,7 @@ const Login = () => {
       if (BigInt(chainId) !== BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) {
         setRegistrationStatus("error");
         setRegisterMessage({
-          text: "Switch to BSC Mainnet or click your wallet address to continue.",
+          text: "Switch to BSC Testnet or click your wallet address to continue.",
           type: "error",
         });
         return;

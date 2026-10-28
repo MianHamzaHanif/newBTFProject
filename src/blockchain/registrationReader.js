@@ -34,6 +34,8 @@ export async function readRegistration(method, ...args) {
 // registration read separate from V2 so a V1-only member can enter and see
 // their historical data before their V2 structure/package import is done.
 export async function readV1Registration(method, ...args) {
+  // No V1/Mainnet users are part of this new-user testnet UI.
+  if (method === "users") return { id: 0n, exists: false };
   const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
   request.timeout = 8000;
   const provider = new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {

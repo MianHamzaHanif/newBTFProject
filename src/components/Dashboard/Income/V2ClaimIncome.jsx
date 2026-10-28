@@ -99,7 +99,7 @@ export default function V2ClaimIncome() {
       setMessage("");
       const packageManager = new ethers.Contract(
         PackageManagerAddress,
-        V2PackageManagerABI,
+        ["function getIncomeReady(address user,uint8 incomeType) view returns (uint256)"],
         createBscReadProvider()
       );
       const incomeLens = new ethers.Contract(
@@ -109,7 +109,9 @@ export default function V2ClaimIncome() {
       );
       const readProvider = createBscReadProvider();
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
-      const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, readProvider);
+      const checkpoint = ethers.isAddress(V2LegacyRankCheckpointAddress)
+        ? new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, readProvider)
+        : null;
       const nextRows = await Promise.all(
         claimActions.map(async (action, index) => {
           let currentAmount = 0n;
@@ -236,7 +238,7 @@ export default function V2ClaimIncome() {
       const rawMessage = error?.shortMessage || error?.reason || error?.message || "";
       setMessage(
         rawMessage.toLowerCase().includes("could not coalesce error")
-          ? "Wallet RPC rejected the claim request. Reconnect the wallet on BSC Mainnet and try again."
+          ? "Wallet RPC rejected the claim request. Reconnect the wallet on BSC Testnet and try again."
           : rawMessage || "Claim failed.",
       );
     } finally {

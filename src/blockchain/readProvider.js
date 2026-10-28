@@ -8,16 +8,7 @@ const WALLET_SESSION_KEY = "btf_connected_wallet";
 // avoids that browser transport failure; public endpoints remain fallbacks
 // for local development and any proxy outage.
 export const getBscReadRpcUrls = () => {
-  const hostname = typeof window === "undefined" ? "" : window.location.hostname.toLowerCase();
-  // btf.marketing is a static Hostinger site, so its `/api` route serves the
-  // SPA HTML rather than JSON-RPC. Route all browser reads through the live
-  // Vercel read-only function there; Vercel deployments remain same-origin.
-  const proxy = typeof window === "undefined"
-    ? ""
-    : hostname === "btf.marketing" || hostname === "www.btf.marketing"
-      ? "https://new-btf-project.vercel.app/api/bsc-rpc"
-      : `${window.location.origin}/api/bsc-rpc`;
-  return [proxy, BSC_MAINNET.rpcUrls[1], BSC_MAINNET.rpcUrls[0]].filter(Boolean);
+  return BSC_MAINNET.rpcUrls;
 };
 
 export const rememberWalletAddress = (address) => {

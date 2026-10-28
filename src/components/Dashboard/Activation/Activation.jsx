@@ -1,3 +1,4 @@
+import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
@@ -98,7 +99,7 @@ export const Activation = () => {
               v2Manager.totalIncomeUsed(user),
             ]);
             const records = await Promise.all(Array.from({ length: Number(lengthRaw) }, async (_, index) => {
-              const record = await v2Manager.getPackageHistoryAt(user, index);
+              const record = await readPackageHistory(v2Manager, user, index);
               return {
                 v2Index: index, amount: BigInt(record.amount ?? record[0] ?? 0n), timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),
                 generated: BigInt(record.roiGenerated ?? record[3] ?? 0n), maximum: BigInt(record.roiMaximum ?? record[4] ?? 0n),
