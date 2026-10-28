@@ -494,18 +494,6 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
             )}
           </div>
 
-          {canViewMigration && (
-            <NavLink
-              to="/migration-data"
-              className="nav"
-              onClick={handleNavItemClick}
-            >
-              <p className="nav-item">
-                <i className="bi bi-arrow-left-right"></i> Migration Data
-              </p>
-            </NavLink>
-          )}
-
           {/* <div className="nav-dropdown">
             <div
               className="nav nav-parent"

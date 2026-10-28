@@ -22,7 +22,6 @@ import {
   MyTeam,
   Withdrawal,
   WithdrawalHistory,
-  MigrationData,
 } from "./pages";
 import Home from "./pages/Home";
 import Login from "./components/Home/Login/Login";
@@ -119,10 +118,7 @@ const App = () => {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/welcomePage" element={<WelcomePage />} />
       <Route path="/alert" element={<Alert />} />
-      {/* Migration must also be available to an authorised operator wallet that
-          is not itself a V2 member. The screen performs its own V2 checks. */}
       <Route element={<DashboardLayout />}>
-        <Route path="/migration-data" element={<MigrationData />} />
         {/* DAO Voting also stays available to the migration authority, even
             when that operational wallet is not a registered V2 member. */}
         <Route path="/dao-voting" element={<Withdrawal />} />
@@ -146,7 +142,6 @@ const App = () => {
         <Route path="/income/v2-claim-history" element={<V2ClaimHistory />} />
         <Route path="/income/v2-claim" element={<V2ClaimIncome />} />
         <Route path="/withdrawal" element={<Withdrawal />} />
-        <Route path="/withdrawal/v1" element={<Withdrawal />} />
         <Route path="/withdrawal/v2" element={<Withdrawal />} />
         <Route path="/withdrawal-history" element={<WithdrawalHistory />} />
         <Route path="/lock" element={<Lock />} />
