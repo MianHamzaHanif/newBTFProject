@@ -45,10 +45,22 @@ export const Activation = () => {
           const inactiveUsed = inactiveLimitFor(sourceName);
           return aggregateUsed > inactiveUsed ? aggregateUsed - inactiveUsed : 0n;
         };
-        const activeIncomeUsed = sum(activeV1, (record) => record.usedIncome)
-          + activeUsedFor(BigInt(sourceTotals.v2AggregateUsed), "V2")
-          + activeUsedFor(BigInt(sourceTotals.v3AggregateUsed), "V3");
-        const activeIncomeLimit = sum(active, (record) => record.incomeLimit);
+        const v3Rows = records.filter((record) => record.source === "V3");
+        const v3AggregateLimit = BigInt(sourceTotals.v3AggregateLimit ?? 0n);
+        const v3AggregateUsed = BigInt(sourceTotals.v3AggregateUsed ?? 0n);
+
+        // A migrated V2 package may have no V3 history row, but its current
+        // limit/usage is already stored in V3. In that case V2 is only a
+        // history fallback: adding both aggregates counts the same use twice.
+        const v3OwnsMigratedState = v3Rows.length === 0 && v3AggregateLimit > 0n;
+        const activeIncomeUsed = v3OwnsMigratedState
+          ? v3AggregateUsed
+          : sum(activeV1, (record) => record.usedIncome)
+            + activeUsedFor(BigInt(sourceTotals.v2AggregateUsed), "V2")
+            + activeUsedFor(v3AggregateUsed, "V3");
+        const activeIncomeLimit = v3OwnsMigratedState
+          ? v3AggregateLimit
+          : sum(active, (record) => record.incomeLimit);
         if (cancelled) return;
 
         setRows(records.map((record, index) => ({
@@ -101,7 +113,6 @@ export const Activation = () => {
       <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Claim Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesIncomeLimit)}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Limit Used</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesIncomeUsed)}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Limit Remaining</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesIncomeRemaining)}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">ROI Day</p><h4 className="withdrawal-card-value">{summary.roiDay ? `${Number(summary.roiDay) / 86_400} Day` : "-"}</h4></div>
     </div>}
     <div className="table-wrapper"><div className="table-card">
       {isLoading && <p className="team-loading">Loading V1, V2 and V3 package details...</p>}

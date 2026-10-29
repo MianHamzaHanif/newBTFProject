@@ -134,8 +134,9 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   };
 
   const readVersion = async (manager, version) => {
-    const [lengthRaw, aggregateUsed, pendingSelfRoi, roiDay] = await Promise.all([
+    const [lengthRaw, aggregateLimit, aggregateUsed, pendingSelfRoi, roiDay] = await Promise.all([
       manager.getPackageHistoryLength(walletAddress),
+      manager.totalIncomeLimit(walletAddress),
       manager.totalIncomeUsed(walletAddress),
       manager.pendingSelfRoi(walletAddress).catch(() => 0n),
       manager.ROI_DAY(walletAddress).catch(() => 0n),
@@ -165,6 +166,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     return {
       records: history.records,
       failedIndexes: history.failedIndexes,
+      aggregateLimit: BigInt(aggregateLimit),
       aggregateUsed: BigInt(aggregateUsed),
       pendingSelfRoi: BigInt(pendingSelfRoi),
       roiDay: BigInt(roiDay),
@@ -177,7 +179,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   const failures = [];
   const v1Data = v1Result.status === "fulfilled" ? v1Result.value : { records: [], failedIndexes: [] };
   const v1 = v1Data.records;
-  const emptyVersion = { records: [], failedIndexes: [], aggregateUsed: 0n, pendingSelfRoi: 0n, roiDay: 0n };
+  const emptyVersion = { records: [], failedIndexes: [], aggregateLimit: 0n, aggregateUsed: 0n, pendingSelfRoi: 0n, roiDay: 0n };
   const v2Data = v2Result.status === "fulfilled" ? v2Result.value : emptyVersion;
   const v3Data = v3Result.status === "fulfilled" ? v3Result.value : emptyVersion;
   const v2 = v2Data.records;
@@ -207,7 +209,9 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     records, failures,
     sourceTotals: {
       v1Claimable: sumBigInt(visibleV1, "claimable"),
+      v2AggregateLimit: v2Data.aggregateLimit,
       v2AggregateUsed: v2Data.aggregateUsed,
+      v3AggregateLimit: v3Data.aggregateLimit,
       v3AggregateUsed: v3Data.aggregateUsed,
       v2PendingSelfRoi: v2Data.pendingSelfRoi,
       v3PendingSelfRoi: v3Data.pendingSelfRoi,
