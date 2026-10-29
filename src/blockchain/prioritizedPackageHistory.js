@@ -169,7 +169,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
       manager.totalIncomeLimit(walletAddress),
       manager.totalIncomeUsed(walletAddress),
       manager.pendingSelfRoi(walletAddress).catch(() => 0n),
-      manager.ROI_DAY(walletAddress).catch(() => 0n),
+      manager.ROI_DAY().catch(() => 0n),
       manager.selfRoiPrincipal(walletAddress).catch(() => 0n),
     ]);
     const length = Number(lengthRaw);
