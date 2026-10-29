@@ -1,12 +1,9 @@
-import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
 import React, { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
-import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
-import { PackageManagerAddress, ReferralNetworkAddress } from "../../../blockchain/address";
+import { ReferralNetworkAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
@@ -38,47 +35,6 @@ const createV1ReadProvider = () => {
   const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
   request.timeout = 30_000;
   return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
-};
-
-const combinedPackageBusiness = async (address, v1Manager, v2Manager) => {
-  const [v1LengthRaw, v2LengthRaw] = await Promise.all([
-    v1Manager.getStakeHistoryLength(address).catch(() => 0n),
-    v2Manager.getPackageHistoryLength(address).catch(() => 0n),
-  ]);
-  const [v1Stakes, v2Packages] = await Promise.all([
-    Promise.all(Array.from({ length: Number(v1LengthRaw) }, (_, index) => v1Manager.userStakeHistory(address, index))),
-    Promise.all(Array.from({ length: Number(v2LengthRaw) }, (_, index) => readPackageHistory(v2Manager, address, index))),
-  ]);
-  const importedKeys = new Map();
-  const v1Total = v1Stakes.reduce((total, stake) => {
-    const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n);
-    const timestamp = BigInt(stake?.timestamp ?? stake?.[7] ?? 0n);
-    const key = `${amount}:${timestamp}`;
-    importedKeys.set(key, (importedKeys.get(key) || 0) + 1);
-    return total + amount;
-  }, 0n);
-  const v2NewTotal = v2Packages.reduce((total, record) => {
-    const amount = BigInt(record?.amount ?? record?.[0] ?? 0n);
-    const timestamp = BigInt(record?.purchasedAt ?? record?.[1] ?? 0n);
-    const key = `${amount}:${timestamp}`;
-    const imported = importedKeys.get(key) || 0;
-    if (imported) { importedKeys.set(key, imported - 1); return total; }
-    return total + amount;
-  }, 0n);
-  return v1Total + v2NewTotal;
-};
-
-// `totalTeamDeposit` in V2 includes the one-time V1 level-business seed.
-// For a V1 + V2 display, add V1 once and only the portion created in V2.
-const v2NewTeamBusiness = async (address, v2User, registry) => {
-  const v2Total = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
-  if (!v2User || v2Total === 0n) return 0n;
-  const seededV1Business = (await Promise.all(
-    Array.from({ length: 15 }, (_, level) =>
-      registry.legacyLevelRemaining(address, level).catch(() => 0n),
-    ),
-  )).reduce((total, amount) => total + BigInt(amount), 0n);
-  return v2Total > seededV1Business ? v2Total - seededV1Business : 0n;
 };
 
 async function ensureBscMainnet() {
@@ -125,8 +81,6 @@ export const PowerIncomeWithdraw = () => {
       const v1PowerManager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, v1Provider);
       const v1PowerModule = new ethers.Contract(await v1PowerManager.powerIncomeModule(), V1_POWER_MODULE_ABI, v1Provider);
       const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, v1Provider);
-      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
-      const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
       const [v1AchievedRaw, v1RewardTimes] = await Promise.all([
         v1PowerModule.activePowerLevel(user),
         Promise.all(Array.from({ length: 12 }, (_, index) => v1PowerManager.rewardAchievedAt(user, index + 1))),
@@ -168,39 +122,26 @@ export const PowerIncomeWithdraw = () => {
         const previous = directMap.get(direct.toLowerCase());
         directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
       }
-      const legacyLegsImported = await registry.legacyLegsReady(user);
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated] = await Promise.all([
-          member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
+        const [v2User, qualified, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
           member.inV2 ? registry.users(member.address).catch(() => null) : null,
-          combinedPackageBusiness(member.address, v1Manager, v2Manager).catch(() => 0n),
           member.inV2 ? registry.hasQualifiedPackage(member.address).catch(() => false) : false,
           member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
           member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
           member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
-          member.inV2 ? registry.legacyLegBusiness(user, member.address).catch(() => 0n) : 0n,
-          member.inV2 ? registry.migrated(member.address).catch(() => false) : false,
         ]);
-        const v2TeamBusiness = await v2NewTeamBusiness(member.address, v2User, registry);
-        const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
-          + v2TeamBusiness;
-        const legBusiness = BigInt(selfBusiness) + teamBusiness;
+        // These two fields are the current active balances. The authoritative
+        // Power/Reward figure below is `legBusiness`, which deliberately
+        // retains inactive package history as well.
+        const selfBusiness = BigInt(v2User?.selfDeposit ?? v2User?.[5] ?? 0n);
+        const teamBusiness = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+        const legBusiness = BigInt(v3LegBusiness);
         const eligible = legacyCounted || everPackage;
-        // This is the V2 formula shown as a read-only preview: V2's leg
-        // business plus V1's self+team baseline, capped at 40% per leg.
-        // Imported legacy legs already contain their V1 amount in V2, so do
-        // not add it again during a partial/full import.
-        const v1Baseline = directMigrated && v1User
-          ? BigInt(v1User.totalTeamDeposit ?? v1User[4] ?? 0n)
-            + BigInt(v1User.selfDeposit ?? v1User[5] ?? 0n)
-          : 0n;
-        const v2FormulaBusiness = BigInt(v2LegBusiness)
-          + (legacyLegsImported || BigInt(importedLegacyBusiness) > 0n ? 0n : v1Baseline);
         const counted = nextLevel && member.inV2 && eligible
-          ? (v2FormulaBusiness > capPerLeg ? capPerLeg : v2FormulaBusiness)
+          ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
           : 0n;
         const rewardCounted = nextReward && member.inV2 && eligible
-          ? (v2FormulaBusiness > rewardCapPerLeg ? rewardCapPerLeg : v2FormulaBusiness)
+          ? (legBusiness > rewardCapPerLeg ? rewardCapPerLeg : legBusiness)
           : 0n;
         return {
           sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness),
@@ -289,9 +230,9 @@ export const PowerIncomeWithdraw = () => {
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
-    { id: "selfBusiness", label: "Direct Business", sortable: true },
-    { id: "teamBusiness", label: "Team Business", sortable: true },
-    { id: "business", label: "Leg Business", sortable: true },
+    { id: "selfBusiness", label: "Active Direct Business", sortable: true },
+    { id: "teamBusiness", label: "Active Team Business", sortable: true },
+    { id: "business", label: "Leg Business (Active + Inactive)", sortable: true },
     { id: "counted", label: "Counted for Next Power", sortable: true },
     { id: "status", label: "Status", sortable: true },
   ];
