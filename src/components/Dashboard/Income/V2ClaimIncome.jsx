@@ -243,7 +243,7 @@ export default function V2ClaimIncome() {
       const rawMessage = error?.shortMessage || error?.reason || error?.message || "";
       setMessage(
         rawMessage.toLowerCase().includes("could not coalesce error")
-          ? "Wallet RPC rejected the claim request. Reconnect the wallet on BSC Testnet and try again."
+          ? "Wallet RPC rejected the claim request. Reconnect the wallet on BSC Mainnet and try again."
           : rawMessage || "Claim failed.",
       );
     } finally {

@@ -910,7 +910,7 @@ const DashboardTop = () => {
       const rawMessage = error?.shortMessage || error?.reason || error?.message || "";
       setBuyStatus(
         rawMessage.toLowerCase().includes("could not coalesce error")
-          ? "Wallet/RPC rejected the request. Please reconnect the wallet on BSC Testnet and try again."
+          ? "Wallet/RPC rejected the request. Please reconnect the wallet on BSC Mainnet and try again."
           : rawMessage || "Buy failed.",
       );
     } finally {

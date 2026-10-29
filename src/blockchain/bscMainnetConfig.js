@@ -1,16 +1,16 @@
-// This copied UI targets the new BSC Testnet deployment only.
+// Active V3 deployment is on BNB Smart Chain Mainnet.
 export const BSC_MAINNET = {
-  chainId: 97,
-  chainIdHex: "0x61",
-  chainName: "BNB Smart Chain Testnet",
+  chainId: 56,
+  chainIdHex: "0x38",
+  chainName: "BNB Smart Chain",
   rpcUrls: [
-    "https://bsc-testnet-rpc.publicnode.com",
-    "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
+    "https://bsc-rpc.publicnode.com",
+    "https://bsc-dataseed.bnbchain.org",
   ],
-  blockExplorerUrls: ["https://testnet.bscscan.com"],
+  blockExplorerUrls: ["https://bscscan.com"],
   nativeCurrency: {
-    name: "Test BNB",
-    symbol: "tBNB",
+    name: "BNB",
+    symbol: "BNB",
     decimals: 18,
   },
 };
