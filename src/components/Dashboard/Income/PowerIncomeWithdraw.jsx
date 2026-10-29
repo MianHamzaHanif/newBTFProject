@@ -138,22 +138,25 @@ export const PowerIncomeWithdraw = () => {
         directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
       }
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v3User, selfBusiness, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
+        const [v1User, v3User, selfBusiness, legacyCounted, everPackage] = await Promise.all([
           member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
           member.inV2 ? registry.users(member.address).catch(() => null) : null,
           combinedPackageBusiness(member.address).catch(() => 0n),
           member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
           member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
-          member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
         ]);
         const v3TeamNew = await v3NewTeamBusiness(member.address, v3User, registry);
         const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v3TeamNew;
-        const legBusiness = BigInt(v3LegBusiness);
+        // Do not use the previously imported V3 `legBusiness` value here.
+        // Older migrations used a single V2 source and can omit V1 business.
+        // The table and both rank summaries must use the identical,
+        // reconciled V1 + V2/V3 calculation.
+        const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
-        const counted = nextLevel && member.inV2 && eligible
+        const counted = nextLevel && eligible
           ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
           : 0n;
-        const rewardCounted = nextReward && member.inV2 && eligible
+        const rewardCounted = nextReward && eligible
           ? (legBusiness > rewardCapPerLeg ? rewardCapPerLeg : legBusiness)
           : 0n;
         return {

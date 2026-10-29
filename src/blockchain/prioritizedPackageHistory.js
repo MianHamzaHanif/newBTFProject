@@ -4,6 +4,7 @@ import {
   LegacyV2PackageManagerAddress,
   PackageManagerAddress,
   PackageMigrationSourceAddress,
+  V2DeploymentBlock,
 } from "./address";
 import { V1_MAINNET } from "./v1MainnetConfig";
 import { createBscReadProvider } from "./readProvider";
@@ -82,6 +83,35 @@ const sumBigInt = (records, field) => records.reduce(
   (total, record) => total + BigInt(record[field] ?? 0n), 0n
 );
 
+// The currently deployed Manager had a faulty history-length reader. Its
+// PackagePurchased events are immutable, indexed by wallet, and let the UI
+// display purchases made before the corrected Manager is redeployed.
+const readV3PurchaseEvents = async (manager, walletAddress, provider) => {
+  const latest = await provider.getBlockNumber();
+  const configuredStart = Number(V2DeploymentBlock || 0);
+  // Never query from genesis when an environment is incomplete. The checked
+  // production setting is the V3 deployment-era block; this fallback keeps
+  // one wallet lookup within public-RPC range limits during local testing.
+  const fromBlock = configuredStart > 0 ? configuredStart : Math.max(0, latest - 50_000);
+  const logs = [];
+  for (let start = fromBlock; start <= latest; start += 50_000) {
+    const end = Math.min(start + 49_999, latest);
+    logs.push(...await manager.queryFilter(manager.filters.PackagePurchased(walletAddress), start, end));
+  }
+  return logs.map((log) => ({
+    source: "V3",
+    sourceIndex: Number(log.args.packageIndex ?? log.args[1] ?? 0n),
+    amount: BigInt(log.args.amount ?? log.args[2] ?? 0n),
+    timestamp: BigInt(log.args.timestamp ?? log.args[3] ?? 0n),
+    generated: 0n,
+    maximum: BigInt(log.args.amount ?? log.args[2] ?? 0n) * 3n,
+    incomeLimit: incomeLimitForPackage(log.args.amount ?? log.args[2] ?? 0n),
+    usedIncome: null,
+    active: true,
+    migratedToV3: false,
+  }));
+};
+
 export const incomeLimitForPackage = (amount) => {
   const value = BigInt(amount ?? 0n);
   if (value === ethers.parseEther("25")) return ethers.parseEther("75");
@@ -134,12 +164,13 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   };
 
   const readVersion = async (manager, version) => {
-    const [lengthRaw, aggregateLimit, aggregateUsed, pendingSelfRoi, roiDay] = await Promise.all([
+    const [lengthRaw, aggregateLimit, aggregateUsed, pendingSelfRoi, roiDay, selfRoiPrincipal] = await Promise.all([
       manager.getPackageHistoryLength(walletAddress),
       manager.totalIncomeLimit(walletAddress),
       manager.totalIncomeUsed(walletAddress),
       manager.pendingSelfRoi(walletAddress).catch(() => 0n),
       manager.ROI_DAY(walletAddress).catch(() => 0n),
+      manager.selfRoiPrincipal(walletAddress).catch(() => 0n),
     ]);
     const length = Number(lengthRaw);
     const history = await readInBatches(length, async (index) => {
@@ -163,8 +194,18 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
         migratedToV3: Boolean(migratedToV3),
       };
     });
+    // Compatibility path for purchases made by the currently deployed V3
+    // Manager before `getPackageHistoryLength` was corrected. It is used
+    // only when the manager reports no rows, so normal deployment paths do
+    // not perform log scans or duplicate history records.
+    let records = history.records;
+    if (version === "V3" && length === 0 && BigInt(aggregateLimit) > 0n) {
+      records = await readV3PurchaseEvents(manager, walletAddress, provider);
+      const principal = BigInt(selfRoiPrincipal ?? 0n);
+      if (principal === 0n) records = records.map((record) => ({ ...record, active: false }));
+    }
     return {
-      records: history.records,
+      records,
       failedIndexes: history.failedIndexes,
       aggregateLimit: BigInt(aggregateLimit),
       aggregateUsed: BigInt(aggregateUsed),

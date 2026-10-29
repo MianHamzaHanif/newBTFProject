@@ -38,7 +38,7 @@ export default [
   "function claimLevelRoi() returns (uint256 claimedAmount)",
   "function claimPowerIncome() returns (uint256 claimedAmount)",
   "function claimRewardIncome() returns (uint256 claimedAmount)",
-  "event PackagePurchased(address indexed user, uint256 amount)",
+  "event PackagePurchased(address indexed user, uint256 indexed packageIndex, uint256 amount, uint256 timestamp)",
   "event DirectIncomeClaimed(address indexed user, uint256 amount)",
   "event SelfRoiClaimed(address indexed user, uint256 amount)",
   "event LevelRoiClaimed(address indexed user, uint256 amount)",
