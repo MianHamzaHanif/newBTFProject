@@ -19,6 +19,7 @@ import {
   SettlementTokenSymbol,
   V2LedgerAddress,
   V2VerifiedLegacyImporterAddress,
+  LegacyV2PackageManagerAddress,
   V3ActionsEnabled,
 } from "../../blockchain/address";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscMainnetConfig";
@@ -218,14 +219,50 @@ const DashboardTop = () => {
       ]);
       const elapsed = Math.max(0, Number(block.timestamp) - Number(startTime));
       const cycleProgress = Number(roiDay) ? elapsed % Number(roiDay) : 0;
-      setPlanActivity({
-        progressText: limit > 0n ? `${toPercent2(used, limit)}% / 100%` : "0% / 100%",
-        activeStakeLabel: currentPackage > 0n
-          ? `Active package: ${formatEther2(currentPackage)} USDT`
-          : "No active package",
-        selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfReady)} USDT`,
-        remainingSeconds: Number(roiDay) ? Number(roiDay) - cycleProgress : 0,
-      });
+      if (currentPackage > 0n || limit > 0n) {
+        setPlanActivity({
+          progressText: limit > 0n ? `${toPercent2(used, limit)}% / 100%` : "0% / 100%",
+          activeStakeLabel: currentPackage > 0n
+            ? `Active package: ${formatEther2(currentPackage)} ${SettlementTokenSymbol}`
+            : "No active package",
+          selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfReady)} ${SettlementTokenSymbol}`,
+          remainingSeconds: Number(roiDay) ? Number(roiDay) - cycleProgress : 0,
+        });
+        return;
+      }
+
+      // A wallet that has not received an active V3 package can still have
+      // an active legacy V2 package. Show that live V2 state before falling
+      // all the way back to V1.
+      const legacyManager = new ethers.Contract(
+        LegacyV2PackageManagerAddress,
+        V2PackageManagerABI,
+        v2Provider,
+      );
+      const [legacyCurrentPackage, legacyLimit, legacyUsed, legacyPendingSelf, legacyRoiDay, legacyStartTime] = await Promise.all([
+        legacyManager.currentPackage(wallet).catch(() => 0n),
+        legacyManager.totalIncomeLimit(wallet).catch(() => 0n),
+        legacyManager.totalIncomeUsed(wallet).catch(() => 0n),
+        legacyManager.pendingSelfRoi(wallet).catch(() => 0n),
+        legacyManager.ROI_DAY().catch(() => 0n),
+        legacyManager.roiStartTime().catch(() => 0n),
+      ]);
+      if (legacyCurrentPackage > 0n || legacyLimit > 0n) {
+        const legacyDay = Number(legacyRoiDay) || 86400;
+        const legacyElapsed = Math.max(0, Number(block.timestamp) - Number(legacyStartTime));
+        const legacyCycleProgress = legacyElapsed % legacyDay;
+        setPlanActivity({
+          progressText: legacyLimit > 0n ? `${toPercent2(legacyUsed, legacyLimit)}% / 100%` : "0% / 100%",
+          activeStakeLabel: legacyCurrentPackage > 0n
+            ? `Active package: ${formatEther2(legacyCurrentPackage)} USDT`
+            : "No active package",
+          selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(legacyPendingSelf)} USDT`,
+          remainingSeconds: legacyDay - legacyCycleProgress,
+        });
+        return;
+      }
+
+      await loadV1PlanActivity(wallet);
       return;
       }
 

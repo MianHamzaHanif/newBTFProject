@@ -1,3 +1,4 @@
+import { loadPrioritizedPackageHistory } from "../../blockchain/prioritizedPackageHistory";
 import { readPackageHistory } from "../../blockchain/packageHistory";
 import React, { useEffect, useState } from "react";
 import img1 from "/icon/icon-7.png";
@@ -10,6 +11,7 @@ import ReferralNetworkABI from "../../blockchain/referralNetworkABI.json";
 import V2PackageManagerABI from "../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../blockchain/v2ReferralRegistryABI";
 import V2IncomeLedgerABI from "../../blockchain/v2IncomeLedgerABI";
+import LegacyV2IncomeLedgerABI from "../../blockchain/legacyV2IncomeLedgerABI";
 import {
   PackageManagerAddress,
   ReferralNetworkAddress,
@@ -17,6 +19,8 @@ import {
   SettlementTokenSymbol,
   V2LedgerAddress,
   V2VerifiedLegacyImporterAddress,
+  LegacyV2LedgerAddress,
+  LegacyV2RegistryAddress,
 } from "../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
@@ -200,6 +204,8 @@ const DashboardBottom = () => {
         const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
         const v2Registry = new ethers.Contract(ReferralNetworkAddress, V2ReferralRegistryABI, v2Provider);
         const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
+        const legacyV2Registry = new ethers.Contract(LegacyV2RegistryAddress, V2ReferralRegistryABI, v2Provider);
+        const legacyV2Ledger = new ethers.Contract(LegacyV2LedgerAddress, LegacyV2IncomeLedgerABI, v2Provider);
         const [totalInvested, incomeLengthRaw, withdrawLengthRaw, packageHistoryLengthRaw, v2TokenDecimals, v2TokenBalanceRaw, v2UserData] = await Promise.all([
           v2Manager.totalUsdtSpent(walletAddress),
           v2Ledger.getUserIncomeHistoryLength(walletAddress),
@@ -220,6 +226,24 @@ const DashboardBottom = () => {
         const levelOpenPromise = Promise.all(
           Array.from({ length: 15 }, (_, index) => v2Registry.isLevelOpen(walletAddress, index).catch(() => false))
         );
+        // Legacy V2 and V3 have independent ledgers. Read both before
+        // combining dashboard totals; a V2 record must not disappear merely
+        // because the V3 migration is already active.
+        const legacyIncomeRecordsPromise = legacyV2Ledger.getUserIncomeHistoryLength(walletAddress)
+          .then((length) => Promise.all(Array.from(
+            { length: Number(length) },
+            (_, index) => legacyV2Ledger.getUserIncomeHistoryAt(walletAddress, index),
+          )))
+          .catch(() => []);
+        const legacyWithdrawRecordsPromise = legacyV2Ledger.getUserWithdrawHistoryLength(walletAddress)
+          .then((length) => Promise.all(Array.from(
+            { length: Number(length) },
+            (_, index) => legacyV2Ledger.getUserWithdrawHistoryAt(walletAddress, index),
+          )))
+          .catch(() => []);
+        const legacyLevelOpenPromise = Promise.all(
+          Array.from({ length: 15 }, (_, index) => legacyV2Registry.isLevelOpen(walletAddress, index).catch(() => false))
+        );
         const v2PackageRecordsPromise = Promise.all(
           Array.from({ length: Number(packageHistoryLengthRaw) }, async (_, index) => {
             const record = await readPackageHistory(v2Manager, walletAddress, index);
@@ -229,14 +253,18 @@ const DashboardBottom = () => {
             };
           }),
         );
-        const [incomeRecords, withdrawRecords, levelOpen, v1Summary, v1PackageRecords, v2PackageRecords, importedV1Indexes] = await Promise.all([
+        const [incomeRecords, withdrawRecords, levelOpen, legacyIncomeRecords, legacyWithdrawRecords, legacyLevelOpen, v1Summary, v1PackageRecords, v2PackageRecords, importedV1Indexes, prioritizedPackages] = await Promise.all([
           incomeRecordsPromise,
           withdrawRecordsPromise,
           levelOpenPromise,
+          legacyIncomeRecordsPromise,
+          legacyWithdrawRecordsPromise,
+          legacyLevelOpenPromise,
           v1SummaryPromise,
           v1PackageRecordsPromise,
           v2PackageRecordsPromise,
           readImportedV1Indexes(v2Provider, walletAddress),
+          loadPrioritizedPackageHistory(walletAddress).catch(() => ({ records: [] })),
         ]);
         const [
           v1DirectIncome,
@@ -251,7 +279,7 @@ const DashboardBottom = () => {
         ] = v1Summary;
         const totalsByType = { direct: 0n, roi: 0n, power: 0n, reward: 0n };
         let totalEarned = 0n;
-        for (const record of incomeRecords) {
+        for (const record of [...legacyIncomeRecords, ...incomeRecords]) {
           const incomeType = Number(record.incomeType ?? record[0]);
           const amount = BigInt(record.amount ?? record[2]);
           totalEarned += amount;
@@ -260,7 +288,8 @@ const DashboardBottom = () => {
           else if (incomeType === 3) totalsByType.power += amount;
           else if (incomeType === 4) totalsByType.reward += amount;
         }
-        const v2Withdrawn = withdrawRecords.reduce((total, record) => total + BigInt(record.amount ?? record[0]), 0n);
+        const v3Withdrawn = withdrawRecords.reduce((total, record) => total + BigInt(record.netAmount ?? record[2] ?? 0n), 0n);
+        const legacyV2Withdrawn = legacyWithdrawRecords.reduce((total, record) => total + BigInt(record.amount ?? record[0] ?? 0n), 0n);
         const v1Earned = BigInt(v1DirectIncome)
           + BigInt(v1SelfRoiIncome)
           + BigInt(v1LevelRoiIncome)
@@ -306,16 +335,23 @@ const DashboardBottom = () => {
         // A level is logically open once if it is open in either version;
         // do not double-count the same 15 referral levels.
         const combinedOpenCount = levelOpen.reduce(
-          (total, isV2Open, index) => total + (isV2Open || v1LevelOpen[index] ? 1 : 0),
+          (total, isV3Open, index) => total + (isV3Open || legacyLevelOpen[index] || v1LevelOpen[index] ? 1 : 0),
           0,
         );
         const v2IsRegistered = Boolean(v2UserData.exists ?? v2UserData[8]);
         const v1IsRegistered = Boolean(v1UserData?.exists ?? v1UserData?.[8])
           || Number(v1UserData?.id ?? v1UserData?.[0] ?? 0) > 0;
+        // Package history has one canonical source per package index:
+        // V3 first, then legacy V2, then V1. It prevents a migrated package
+        // from appearing twice in Total Invested.
+        const prioritizedInvestment = (prioritizedPackages.records || []).reduce(
+          (total, record) => total + BigInt(record.amount ?? 0n),
+          0n,
+        );
         setStats({
           totalEarned: formatUsd(totalEarned + v1Earned),
-          totalInvested: formatUsd(BigInt(totalInvested) + visibleV1Investment),
-          totalWithdrawn: formatUsd(v2Withdrawn + BigInt(v1Withdrawn)),
+          totalInvested: formatUsd(prioritizedInvestment || (BigInt(totalInvested) + visibleV1Investment)),
+          totalWithdrawn: formatUsd(v3Withdrawn + legacyV2Withdrawn + BigInt(v1Withdrawn)),
         });
         setTokenInfo({ symbol: TOKEN_LABEL, balance: formatToken(v2TokenBalanceRaw, Number(v2TokenDecimals) || 18) });
         setWithdrawnByType({

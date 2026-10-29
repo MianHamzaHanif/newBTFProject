@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
+import LegacyV2IncomeLedgerABI from "../../../blockchain/legacyV2IncomeLedgerABI";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { LegacyV2LedgerAddress, V2LedgerAddress } from "../../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
@@ -51,8 +52,8 @@ export const WithdrawalHistory = () => {
 
       const v1Provider = new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl);
       const v1Referral = new ethers.Contract(V1_MAINNET.referralNetwork, ReferralNetworkABI, v1Provider);
-      const readLedger = async (ledgerAddress) => {
-        const ledger = new ethers.Contract(ledgerAddress, V2IncomeLedgerABI, createBscReadProvider());
+      const readLedger = async (ledgerAddress, abi = V2IncomeLedgerABI) => {
+        const ledger = new ethers.Contract(ledgerAddress, abi, createBscReadProvider());
         const length = await ledger.getUserWithdrawHistoryLength(walletAddress);
         return readInBatches(Number(length), (index) => ledger.getUserWithdrawHistoryAt(walletAddress, index));
       };
@@ -60,7 +61,7 @@ export const WithdrawalHistory = () => {
       const [v1Result, v2Result, v3Result] = await Promise.allSettled([
         v1Referral.getUserWithdrawSummaryRecordsLength(walletAddress)
           .then((length) => readInBatches(Number(length), (index) => v1Referral.getUserWithdrawSummaryRecordAt(walletAddress, index))),
-        readLedger(LegacyV2LedgerAddress),
+        readLedger(LegacyV2LedgerAddress, LegacyV2IncomeLedgerABI),
         readLedger(V2LedgerAddress),
       ]);
       const v1Records = v1Result.status === "fulfilled" ? v1Result.value : [];
@@ -82,9 +83,9 @@ export const WithdrawalHistory = () => {
           rawTimestamp: timestamp,
         };
       }).filter((row) => row.rawTotal > 0n);
-      const ledgerRows = (records) => records.map((record) => {
-        const total = BigInt(record.netAmount ?? record[2] ?? 0n);
-        const timestamp = BigInt(record.timestamp ?? record[3] ?? 0n);
+      const ledgerRows = (records, legacy = false) => records.map((record) => {
+        const total = BigInt(legacy ? (record.amount ?? record[0] ?? 0n) : (record.netAmount ?? record[2] ?? 0n));
+        const timestamp = BigInt(legacy ? (record.timestamp ?? record[1] ?? 0n) : (record.timestamp ?? record[3] ?? 0n));
         return {
           direct: "-",
           selfRoi: "-",
@@ -97,7 +98,7 @@ export const WithdrawalHistory = () => {
           rawTimestamp: timestamp,
         };
       }).filter((row) => row.rawTotal > 0n);
-      const v2Rows = ledgerRows(v2Records);
+      const v2Rows = ledgerRows(v2Records, true);
       const v3Rows = ledgerRows(v3Records);
 
       setV1Total(formatAmount(v1Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));
