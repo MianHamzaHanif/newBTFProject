@@ -20,11 +20,13 @@ import {
   V2LedgerAddress,
   V2VerifiedLegacyImporterAddress,
   LegacyV2PackageManagerAddress,
+  LegacyV2LedgerAddress,
   V3ActionsEnabled,
 } from "../../blockchain/address";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscMainnetConfig";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
+import { loadPrioritizedPackageHistory } from "../../blockchain/prioritizedPackageHistory";
 
 const LEGACY_IMPORT_EVENT = new ethers.Interface([
   "event LegacyPackageSnapshotImported(address indexed user,uint256 indexed sourceIndex,uint256 amount,uint256 usedIncome)",
@@ -212,19 +214,53 @@ const DashboardTop = () => {
       const v2Lens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, v2Provider);
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
       {
-      const [currentPackage, limit, used, selfReady, roiDay, startTime, block] = await Promise.all([
+      const [currentPackage, limit, used, selfReady, roiDay, startTime, block, packageHistory] = await Promise.all([
         v2Manager.currentPackage(wallet), v2Manager.totalIncomeLimit(wallet),
         v2Manager.totalIncomeUsed(wallet), v2Lens.getIncomeReady(wallet, 1),
         v2Manager.ROI_DAY(), v2Manager.roiStartTime(), v2Provider.getBlock("latest"),
+        loadPrioritizedPackageHistory(wallet).catch(() => ({ records: [] })),
       ]);
       const elapsed = Math.max(0, Number(block.timestamp) - Number(startTime));
       const cycleProgress = Number(roiDay) ? elapsed % Number(roiDay) : 0;
       if (currentPackage > 0n || limit > 0n) {
+        // Match the original dashboard: plan progress is lifetime combined
+        // earnings against the de-duplicated V1+V2+V3 package cap, not only
+        // the current active package. For user 55 this is the 2,150 cap
+        // shown on the original domain.
+        const combinedIncomeLimit = (packageHistory.records || []).reduce(
+          (total, record) => total + BigInt(record.incomeLimit ?? 0n),
+          0n,
+        );
+        const v1Provider = new ethers.JsonRpcProvider(
+          V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true },
+        );
+        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
+        const legacyLedger = new ethers.Contract(LegacyV2LedgerAddress, V2IncomeLedgerABI, v2Provider);
+        const [v1Net, v1Wallet, feeBP, legacyIncomeLength, readyAmounts] = await Promise.all([
+          v1Manager.totalIncomeWithdrawnToken(wallet),
+          v1Manager.incomeWalletToken(wallet),
+          v1Manager.withdrawFeeBP(),
+          legacyLedger.getUserIncomeHistoryLength(wallet),
+          Promise.all(Array.from({ length: 5 }, (_, incomeType) => v2Lens.getIncomeReady(wallet, incomeType).catch(() => 0n))),
+        ]);
+        let legacyClaimed = 0n;
+        const historyLength = Number(legacyIncomeLength ?? 0n);
+        for (let start = 0; start < historyLength; start += 10) {
+          const batch = Array.from({ length: Math.min(10, historyLength - start) }, (_, offset) => start + offset);
+          const entries = await Promise.all(batch.map((index) => legacyLedger.getUserIncomeHistoryAt(wallet, index)));
+          legacyClaimed += entries.reduce((total, entry) => total + BigInt(entry.amount ?? entry[2] ?? 0n), 0n);
+        }
+        const v1FeeBP = BigInt(feeBP ?? 0n);
+        const v1Gross = BigInt(v1Net) + (v1FeeBP < 10_000n
+          ? (BigInt(v1Net) * v1FeeBP) / (10_000n - v1FeeBP)
+          : 0n) + BigInt(v1Wallet);
+        const readyIncome = readyAmounts.reduce((total, amount) => total + BigInt(amount ?? 0n), 0n);
+        const combinedEarned = v1Gross + legacyClaimed + readyIncome;
+        const displayLimit = combinedIncomeLimit > 0n ? combinedIncomeLimit : BigInt(limit);
+        const cappedEarned = combinedEarned > displayLimit ? displayLimit : combinedEarned;
         setPlanActivity({
-          progressText: limit > 0n ? `${toPercent2(used, limit)}% / 100%` : "0% / 100%",
-          activeStakeLabel: currentPackage > 0n
-            ? `Active package: ${formatEther2(currentPackage)} ${SettlementTokenSymbol}`
-            : "No active package",
+          progressText: displayLimit > 0n ? `${toPercent2(cappedEarned, displayLimit)}% / 100%` : "0% / 100%",
+          activeStakeLabel: `Combined income limit: ${formatEther2(displayLimit)} USDT`,
           selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfReady)} ${SettlementTokenSymbol}`,
           remainingSeconds: Number(roiDay) ? Number(roiDay) - cycleProgress : 0,
         });
