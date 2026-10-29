@@ -98,8 +98,9 @@ export const Income4 = () => {
       );
       const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, provider);
 
-      const [powerDetails, roiDay, latestBlock] = await Promise.all([
+      const [powerDetails, powerReady, roiDay, latestBlock] = await Promise.all([
         incomeLens.getPowerDetails(user),
+        incomeLens.getIncomeReady(user, 3),
         manager.ROI_DAY(),
         provider.getBlock("latest"),
       ]);
@@ -268,7 +269,10 @@ export const Income4 = () => {
         });
         nextQualified = legQualified.reduce((total, amount) => total + amount, 0n);
       }
-      setDetails(powerDetails);
+      // The card is deliberately sourced from V3's ready-income lens. V1/V2
+      // rows are history only; adding them here would show a balance that the
+      // active V3 claim function cannot necessarily pay.
+      setDetails({ ...powerDetails, readyAmount: powerReady });
       setLegacyPower(legacySchedule.set ? {
         originalAchievedAt: legacySchedule.originalAchievedAt,
         nextInstallmentAt: legacySchedule.nextInstallmentAt,
@@ -361,9 +365,7 @@ export const Income4 = () => {
   const powerTime = finalizedBaselineMatchesV1 && !hasHigherV2Power
     ? BigInt(v1Power?.activatedAt ?? 0n)
     : BigInt(finalizedInV1 ? 0n : legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt || BigInt(v1Power?.activatedAt ?? 0n);
-  const powerClaimable = BigInt(details?.claimableAmount ?? 0n)
-    + BigInt(finalizedInV1 ? 0n : legacyPower?.claimableAmount ?? 0n)
-    + (showV1Power ? BigInt(v1Power?.claimableAmount ?? 0n) : 0n);
+  const powerClaimable = BigInt(details?.readyAmount ?? 0n);
   const visibleV2Claimed = visibleLevelDetails.reduce(
     (total, item) => total + BigInt(item.claimedAmount ?? 0n),
     0n,
@@ -415,8 +417,22 @@ export const Income4 = () => {
       lastClaimAt: formatTime(displayed.lastClaimAt),
     };
   });
+  // `getPowerDetails` exposes the continuing V3 rank only. Preserve every
+  // older P-level read manually from V1/V2 when V3 has no snapshot for that
+  // level, otherwise a migrated user would only see their latest rank.
+  const fallbackHistoryRows = Object.values(legacyPowerLevels)
+    .filter((item) => item?.level && !v2HistoryRows.some((row) => row.level === `P${item.level}`))
+    .map((item) => ({
+      level: `P${item.level}`,
+      activatedAt: formatTime(item.activatedAt),
+      releasedCount: `${Number(item.releasedCount ?? 0n)} / 20`,
+      claimedCount: Number(item.claimedCount ?? 0n),
+      claimedAmount: formatUsdt(item.claimedAmount),
+      lastClaimAt: formatTime(item.lastClaimAt),
+    }));
   const historyRows = [
     ...v2HistoryRows,
+    ...fallbackHistoryRows,
     // The rank checkpoint is stored and paid by V2. Keep it as a V2 row;
     // this prevents the old V1 P-level from appearing twice after migration.
     ...(!finalizedInV1 && legacyPower && !v2HistoryRows.some((item) => item.level === `P${legacyPower.level}`) ? [{
@@ -427,7 +443,7 @@ export const Income4 = () => {
       claimedAmount: "-",
       lastClaimAt: "V2 migrated schedule",
     }] : []),
-    ...(showV1Power ? [{
+    ...(showV1Power && !fallbackHistoryRows.some((item) => item.level === `P${v1Power.level}`) ? [{
       level: `P${v1Power.level}`,
       activatedAt: formatTime(v1Power.activatedAt),
       releasedCount: `${finalizedBaselineMatchesV1 ? displayedReleasedCount : v1Power.claimedCount} / 20`,
