@@ -473,7 +473,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
                   className="nav"
                   onClick={handleNavItemClick}
                 >
-                  <p className="nav-item sub">Withdraw V2</p>
+                  <p className="nav-item sub">Withdraw V3</p>
                 </NavLink>
 
                 <NavLink
