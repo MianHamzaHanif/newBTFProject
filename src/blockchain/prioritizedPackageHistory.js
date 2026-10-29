@@ -53,6 +53,9 @@ const removeCovered = (records, coverage) => records.filter((record) => {
   coverage.set(key, count - 1);
   return false;
 });
+const sumBigInt = (records, field) => records.reduce(
+  (total, record) => total + BigInt(record[field] ?? 0n), 0n
+);
 
 export const incomeLimitForPackage = (amount) => {
   const value = BigInt(amount ?? 0n);
@@ -87,24 +90,29 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
       const amount = BigInt(stake.packageValue ?? stake[0] ?? 0n);
       const maximum = BigInt(roi.maxRoi ?? roi[1] ?? 0n);
       const generated = BigInt(roi.totalAccrued ?? roi[2] ?? 0n);
+      const claimable = BigInt(roi.claimable ?? roi[4] ?? 0n);
       const incomeLimit = BigInt(income.incomeLimit ?? income[0] ?? 0n);
       const usedIncome = BigInt(income.usedIncome ?? income[1] ?? 0n);
       const active = !Boolean(income.completed ?? income[3]);
       return {
         source: "V1", sourceIndex: index, amount,
         timestamp: BigInt(stake.timestamp ?? stake[7] ?? 0n), maximum, generated,
-        incomeLimit, usedIncome, active, migratedToV3: Boolean(migratedToV3),
+        claimable, incomeLimit, usedIncome,
+        remainingIncome: BigInt(income.remainingIncome ?? income[2] ?? 0n),
+        active, migratedToV3: Boolean(migratedToV3),
       };
     });
   };
 
   const readVersion = async (manager, version) => {
-    const [lengthRaw, aggregateUsed] = await Promise.all([
+    const [lengthRaw, aggregateUsed, pendingSelfRoi, roiDay] = await Promise.all([
       manager.getPackageHistoryLength(walletAddress),
       manager.totalIncomeUsed(walletAddress),
+      manager.pendingSelfRoi(walletAddress).catch(() => 0n),
+      manager.ROI_DAY(walletAddress).catch(() => 0n),
     ]);
     const length = Number(lengthRaw);
-    return readInBatches(length, async (index) => {
+    const records = await readInBatches(length, async (index) => {
       const [record, migratedToV3] = await Promise.all([
         manager.getPackageHistoryAt(walletAddress, index),
         version === "V2" ? source.v2IndexRegistered(walletAddress, index).catch(() => false) : false,
@@ -125,6 +133,12 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
         migratedToV3: Boolean(migratedToV3),
       };
     });
+    return {
+      records,
+      aggregateUsed: BigInt(aggregateUsed),
+      pendingSelfRoi: BigInt(pendingSelfRoi),
+      roiDay: BigInt(roiDay),
+    };
   };
 
   const [v1Result, v2Result, v3Result] = await Promise.allSettled([
@@ -132,8 +146,11 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   ]);
   const failures = [];
   const v1 = v1Result.status === "fulfilled" ? v1Result.value : [];
-  const v2 = v2Result.status === "fulfilled" ? v2Result.value : [];
-  const v3 = v3Result.status === "fulfilled" ? v3Result.value : [];
+  const emptyVersion = { records: [], aggregateUsed: 0n, pendingSelfRoi: 0n, roiDay: 0n };
+  const v2Data = v2Result.status === "fulfilled" ? v2Result.value : emptyVersion;
+  const v3Data = v3Result.status === "fulfilled" ? v3Result.value : emptyVersion;
+  const v2 = v2Data.records;
+  const v3 = v3Data.records;
   if (v1Result.status === "rejected") failures.push("V1 history could not be loaded");
   if (v2Result.status === "rejected") failures.push("V2 history could not be loaded");
   if (v3Result.status === "rejected") failures.push("V3 history could not be loaded");
@@ -144,5 +161,16 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   const visibleV1 = removeCovered(visibleV1Candidates, countRecords(v2));
   const records = [...visibleV1, ...visibleV2, ...v3]
     .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
-  return { records, failures };
+  return {
+    records, failures,
+    sourceTotals: {
+      v1Claimable: sumBigInt(visibleV1, "claimable"),
+      v2AggregateUsed: v2Data.aggregateUsed,
+      v3AggregateUsed: v3Data.aggregateUsed,
+      v2PendingSelfRoi: v2Data.pendingSelfRoi,
+      v3PendingSelfRoi: v3Data.pendingSelfRoi,
+      v2RoiDay: v2Data.roiDay,
+      v3RoiDay: v3Data.roiDay,
+    },
+  };
 };

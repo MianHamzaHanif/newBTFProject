@@ -8,6 +8,11 @@ import { getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
 const sum = (records, read) => records.reduce((total, record) => total + BigInt(read(record) ?? 0n), 0n);
+const percent = (numerator, denominator) => {
+  const top = BigInt(numerator ?? 0n);
+  const bottom = BigInt(denominator ?? 0n);
+  return bottom === 0n ? "0.00" : (Number((top * 10000n) / bottom) / 100).toFixed(2);
+};
 const formatAmount = (value) => {
   try { return Number(ethers.formatEther(value ?? 0n)).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }); }
   catch { return "0.0000"; }
@@ -29,11 +34,21 @@ export const Activation = () => {
       try {
         setIsLoading(true); setMessage("");
         const wallet = await getReadWalletAddress();
-        const { records, failures } = await loadPrioritizedPackageHistory(wallet);
+        const { records, failures, sourceTotals } = await loadPrioritizedPackageHistory(wallet);
         const active = records.filter((record) => record.active);
-        const knownUsed = records.filter((record) => record.usedIncome !== null);
-        const knownLimit = sum(knownUsed, (record) => record.incomeLimit);
-        const knownUsedAmount = sum(knownUsed, (record) => record.usedIncome);
+        const activeV1 = active.filter((record) => record.source === "V1");
+        const inactiveLimitFor = (sourceName) => sum(
+          records.filter((record) => record.source === sourceName && !record.active),
+          (record) => record.incomeLimit,
+        );
+        const activeUsedFor = (aggregateUsed, sourceName) => {
+          const inactiveUsed = inactiveLimitFor(sourceName);
+          return aggregateUsed > inactiveUsed ? aggregateUsed - inactiveUsed : 0n;
+        };
+        const activeIncomeUsed = sum(activeV1, (record) => record.usedIncome)
+          + activeUsedFor(BigInt(sourceTotals.v2AggregateUsed), "V2")
+          + activeUsedFor(BigInt(sourceTotals.v3AggregateUsed), "V3");
+        const activeIncomeLimit = sum(active, (record) => record.incomeLimit);
         if (cancelled) return;
 
         setRows(records.map((record, index) => ({
@@ -45,17 +60,19 @@ export const Activation = () => {
           roiStatus: record.active && record.generated < record.maximum ? "Yes" : "No",
         })));
         setSummary({
-          visiblePackages: records.length,
-          activePackages: active.length,
-          totalAmount: sum(records, (record) => record.amount),
-          activeAmount: sum(active, (record) => record.amount),
-          totalSelfRoiLimit: sum(records, (record) => record.maximum),
-          activeIncomeLimit: sum(active, (record) => record.incomeLimit),
-          // Used value is shown only where the contract exposes a reliable
-          // per-package figure; no aggregate is incorrectly assigned to rows.
-          knownUsedAmount,
-          knownRemaining: knownLimit > knownUsedAmount ? knownLimit - knownUsedAmount : 0n,
-          knownUsedCount: knownUsed.length,
+          // Keep the original UI cards, but calculate every value from the
+          // single de-duplicated V3 -> V2 -> V1 package list above.
+          totalRoiPackageAmount: sum(records, (record) => record.amount),
+          activePackagesAmount: sum(active, (record) => record.amount),
+          pendingRoi: BigInt(sourceTotals.v1Claimable) + BigInt(sourceTotals.v2PendingSelfRoi) + BigInt(sourceTotals.v3PendingSelfRoi),
+          roiMaximum: sum(records, (record) => record.maximum),
+          roiProgress: `${percent(sum(records, (record) => record.generated), sum(active, (record) => record.maximum))}% / 100.00%`,
+          allPackagesIncomeLimit: sum(records, (record) => record.incomeLimit),
+          activePackagesIncomeLimit: activeIncomeLimit,
+          activePackagesIncomeUsed: activeIncomeUsed,
+          activePackagesIncomeRemaining: activeIncomeLimit > activeIncomeUsed
+            ? activeIncomeLimit - activeIncomeUsed : 0n,
+          roiDay: sourceTotals.v3RoiDay || sourceTotals.v2RoiDay,
         });
         setMessage(failures.length ? `${failures.join(". ")}. Other available package data is shown.` : records.length ? "" : "No V1, V2 or V3 package has been purchased yet.");
       } catch (error) {
@@ -75,14 +92,16 @@ export const Activation = () => {
 
   return <div className="page-container"><h1>Activation Package</h1>
     {summary && <div className="withdrawal-grid mb-4">
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Visible Packages</p><h4 className="withdrawal-card-value">{summary.visiblePackages}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Active Packages</p><h4 className="withdrawal-card-value">{summary.activePackages}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Total Package Amount</p><h4 className="withdrawal-card-value">{formatAmount(summary.totalAmount)}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Active Package Amount</p><h4 className="withdrawal-card-value">{formatAmount(summary.activeAmount)}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI 3x Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.totalSelfRoiLimit)}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Active Income Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.activeIncomeLimit)}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Known Used Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.knownUsedAmount)}</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Known Remaining Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.knownRemaining)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Total Amount Receiving Self ROI</p><h4 className="withdrawal-card-value">{formatAmount(summary.totalRoiPackageAmount)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Active Packages Total</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesAmount)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI Claimable</p><h4 className="withdrawal-card-value">{formatAmount(summary.pendingRoi)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI 3x Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.roiMaximum)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI Progress / Target</p><h4 className="withdrawal-card-value">{summary.roiProgress}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Overall Income Claim Limit (All Packages)</p><h4 className="withdrawal-card-value">{formatAmount(summary.allPackagesIncomeLimit)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Claim Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesIncomeLimit)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Limit Used</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesIncomeUsed)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Package Active Income Limit Remaining</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesIncomeRemaining)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">ROI Day</p><h4 className="withdrawal-card-value">{summary.roiDay ? `${Number(summary.roiDay) / 86_400} Day` : "-"}</h4></div>
     </div>}
     <div className="table-wrapper"><div className="table-card">
       {isLoading && <p className="team-loading">Loading V1, V2 and V3 package details...</p>}
