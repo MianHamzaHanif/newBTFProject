@@ -40,14 +40,14 @@ const withdrawErrorMessage = (error) => {
         ["string"],
         `0x${revertData.slice(10)}`,
       )[0];
-      if (reason === "NO_BALANCE") return "No V2 income is credited to this connected wallet.";
-      if (reason === "MIN_WITHDRAW") return "Your credited V2 income is below the withdrawal minimum.";
-      return `V2 withdrawal was rejected: ${reason}.`;
+        if (reason === "NO_BALANCE") return "No V3 income is credited to this connected wallet.";
+        if (reason === "MIN_WITHDRAW") return "Your credited V3 income is below the withdrawal minimum.";
+        return `V3 withdrawal was rejected: ${reason}.`;
     } catch {
       // Fall through to the provider's normal message below.
     }
   }
-  return error?.shortMessage || error?.reason || error?.message || "V2 withdrawal failed.";
+  return error?.shortMessage || error?.reason || error?.message || "V3 withdrawal failed.";
 };
 
 const V1_MANAGER_ABI = [
@@ -285,7 +285,7 @@ export default function V2Withdrawal() {
       setMessage("");
       const user = await getReadWalletAddress();
       if (!user || !ethers.isAddress(user)) throw new Error("Please connect your wallet.");
-      if (!ethers.isAddress(V2LedgerAddress)) throw new Error("V2 ledger address is not configured.");
+      if (!ethers.isAddress(V2LedgerAddress)) throw new Error("V3 ledger address is not configured.");
 
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, createBscReadProvider());
       const [balance, minimum] = await Promise.all([
@@ -312,7 +312,7 @@ export default function V2Withdrawal() {
       setPending(0n);
       setMinimumWithdraw(V2_UI_MIN_WITHDRAWAL);
       setTotalWithdrawn(0n);
-      setMessage(error?.shortMessage || error?.message || "Could not load V2 withdrawal data.");
+      setMessage(error?.shortMessage || error?.message || "Could not load V3 withdrawal data.");
     } finally {
       setLoading(false);
     }
@@ -363,7 +363,7 @@ export default function V2Withdrawal() {
       return;
     }
     if (pending <= 0n) {
-      setMessage("No V2 income is pending for withdrawal.");
+      setMessage("No V3 income is pending for withdrawal.");
       return;
     }
     if (pending < minimumWithdraw) {
@@ -373,7 +373,7 @@ export default function V2Withdrawal() {
 
     try {
       setWithdrawing(true);
-      setMessage("Confirm V2 withdrawal in your wallet.");
+      setMessage("Confirm V3 withdrawal in your wallet.");
       await window.ethereum.request({ method: "eth_requestAccounts" });
       await ensureBscMainnet();
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
@@ -385,7 +385,7 @@ export default function V2Withdrawal() {
       const signerBalance = BigInt(await ledger.balanceOf(signerAddress));
       setPending(signerBalance);
       if (signerBalance === 0n) {
-        setMessage("No V2 income is credited to this connected wallet.");
+        setMessage("No V3 income is credited to this connected wallet.");
         return;
       }
       if (signerBalance < minimumWithdraw) {
@@ -398,7 +398,7 @@ export default function V2Withdrawal() {
       await ledger.withdrawAll.staticCall();
       const tx = await ledger.withdrawAll();
       await tx.wait();
-      setMessage("V2 income withdrawn successfully.");
+      setMessage(`V3 income withdrawn successfully in ${SettlementTokenSymbol}.`);
       await load();
     } catch (error) {
       setMessage(withdrawErrorMessage(error));
@@ -519,13 +519,13 @@ export default function V2Withdrawal() {
           <h4 className="withdrawal-card-value">{formatUsdt(totalWithdrawn)} USDT</h4>
         </div>
         <div className="withdrawal-card">
-          <p className="withdrawal-card-title">Minimum V2 Withdrawal</p>
-          <h4 className="withdrawal-card-value">{formatUsdt(minimumWithdraw)} USDT</h4>
+          <p className="withdrawal-card-title">Minimum V3 Withdrawal</p>
+          <h4 className="withdrawal-card-value">{formatUsdt(minimumWithdraw)} {SettlementTokenSymbol}</h4>
         </div>
       </div>
       <div className="withdraw-action-wrap">
         <button className="custom-button withdraw-btn" onClick={withdraw} disabled={WITHDRAWALS_PAUSED || withdrawing || pending < minimumWithdraw}>
-          {WITHDRAWALS_PAUSED ? "Withdrawal Paused" : withdrawing ? "Withdrawing..." : "Withdraw V2"}
+          {WITHDRAWALS_PAUSED ? "Withdrawal Paused" : withdrawing ? "Withdrawing..." : "Withdraw V3"}
         </button>
         {message ? <p className="team-loading withdraw-status">{message}</p> : null}
       </div>
