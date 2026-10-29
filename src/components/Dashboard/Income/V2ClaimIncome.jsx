@@ -11,7 +11,6 @@ import {
   PackageManagerAddress,
   TokenAddress,
   V2LedgerAddress,
-  V2LegacyRankCheckpointAddress,
   V3ActionsEnabled
 } from "../../../blockchain/address";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
@@ -28,11 +27,6 @@ const claimActions = [
   { method: "claimPowerIncome", incomeType: 3, label: "Power Income" },
   { method: "claimRewardIncome", incomeType: 4, label: "Reward Income" }
 ];
-const RANK_CHECKPOINT_READ_ABI = [
-  "function previewPowerClaimable(address user) view returns(uint256 level,uint256 amount)",
-  "function previewRewardClaimable(address user,uint256 index) view returns(uint256 amount)"
-];
-
 const formatAmount = (amount) => {
   try {
     return Number(ethers.formatEther(amount || 0n)).toLocaleString(undefined, {
@@ -88,7 +82,7 @@ export default function V2ClaimIncome() {
   const loadClaimData = useCallback(async () => {
     if (!ethers.isAddress(PackageManagerAddress)) {
       setRows([]);
-      setMessage("V2 PackageManager address is not configured yet.");
+      setMessage("V3 PackageManager address is not configured yet.");
       return;
     }
 
@@ -110,47 +104,15 @@ export default function V2ClaimIncome() {
       const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, createBscReadProvider());
       const readProvider = createBscReadProvider();
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
-      const checkpoint = ethers.isAddress(V2LegacyRankCheckpointAddress)
-        ? new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, readProvider)
-        : null;
       const nextRows = await Promise.all(
         claimActions.map(async (action, index) => {
           let currentAmount = 0n;
           let claimedAmount = 0n;
 
           try {
-            // Raw ready income is displayed independently. The shared package
-            // cap is enforced only when the user presses Claim.
+            // Strictly V3-ready income. V1/V2 checkpoint previews are not
+            // combined here; users claim only against the V3 deployment.
             currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
-
-            // The legacy checkpoint keeps a verified V1 remainder until the
-            // user claims Power. Preview is calculated in the checkpoint from
-            // the current block, including any due 10-day installment.
-            if (action.incomeType === 3) {
-              try {
-                const [, legacyReady] = await checkpoint.previewPowerClaimable(wallet);
-                currentAmount += legacyReady;
-              } catch {
-                // A prior deployment may not yet contain the optional
-                // checkpoint preview method. Keep normal V2 income visible.
-              }
-            }
-            if (action.incomeType === 4) {
-              try {
-                const legacyRewards = await Promise.all(
-                  Array.from({ length: 12 }, (_, offset) => checkpoint.previewRewardClaimable(wallet, offset + 1))
-                );
-                currentAmount += legacyRewards.reduce((total, amount) => total + BigInt(amount), 0n);
-              } catch {
-                // Keep normal V2 Reward preview available until the updated
-                // legacy checkpoint is deployed.
-              }
-            }
-
-            // Show the raw accrued amount for every income type. The shared
-            // package cap is intentionally applied only when Claim is sent;
-            // therefore a visible Power/Reward amount can still Flush if the
-            // user has no remaining package-income capacity.
           } catch {
             currentAmount = 0n;
           }
@@ -236,9 +198,9 @@ export default function V2ClaimIncome() {
         setMessage("Claim is pending or failed. Check your wallet Activity, then refresh amounts.");
         return;
       }
-      setMessage("Income claimed successfully and credited to the V2 ledger.");
+      setMessage("Income claimed successfully and credited to the V3 ledger.");
       await loadClaimData();
-      window.dispatchEvent(new Event("btf:v2-data-changed"));
+      window.dispatchEvent(new Event("btf:v3-data-changed"));
     } catch (error) {
       const rawMessage = error?.shortMessage || error?.reason || error?.message || "";
       setMessage(
@@ -285,7 +247,7 @@ export default function V2ClaimIncome() {
 
   return (
     <div className="page-container">
-      <h1>Claim V2 Income</h1>
+      <h1>Claim Income</h1>
       <div className="table-wrapper">
         <div className="table-card">
           {CLAIMS_PAUSED && <p className="team-loading">{MIGRATION_PAUSED_MESSAGE}</p>}

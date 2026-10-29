@@ -105,6 +105,9 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
 
   const readV1 = async () => {
     const length = Number(await v1Manager.getStakeHistoryLength(walletAddress));
+    // V1's public RPC endpoint throttles the four calls needed for each row
+    // when several indexes are requested together. Read V1 one index at a
+    // time so a user's old/inactive history is not dropped on mobile.
     const result = await readInBatches(length, async (index) => {
       const [stake, income, roi, migratedToV3] = await Promise.all([
         v1Manager.userStakeHistory(walletAddress, index),
@@ -126,7 +129,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
         remainingIncome: BigInt(income.remainingIncome ?? income[2] ?? 0n),
         active, migratedToV3: Boolean(migratedToV3),
       };
-    });
+    }, 1);
     return result;
   };
 

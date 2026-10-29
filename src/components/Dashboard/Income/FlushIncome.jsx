@@ -2,10 +2,8 @@ import { TableCell } from "@mui/material";
 import React, { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
-import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
 import V2FlushLedgerABI from "../../../blockchain/v2FlushLedgerABI";
-import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
-import { V2FlushLedgerAddress } from "../../../blockchain/address";
+import { LegacyV2FlushLedgerAddress, V2FlushLedgerAddress } from "../../../blockchain/address";
 import { BSC_MAINNET } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
@@ -38,8 +36,7 @@ async function readInBatches(length, readRecord) {
 }
 
 export const FlushIncome = () => {
-  const [v1Summary, setV1Summary] = useState(Array(5).fill("0.0000"));
-  const [v2Summary, setV2Summary] = useState(Array(5).fill("0.0000"));
+  const [summary, setSummary] = useState(Array(5).fill("0.0000"));
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -51,44 +48,8 @@ export const FlushIncome = () => {
       const user = await getReadWalletAddress();
       if (!user || !ethers.isAddress(user)) throw new Error("Please connect your wallet.");
 
-      const readV1 = async () => {
-        const referral = new ethers.Contract(
-          V1_MAINNET.referralNetwork,
-          ReferralNetworkABI,
-          new ethers.JsonRpcProvider(V1_MAINNET.rpcUrl)
-        );
-        const length = Number(await referral.getUserWithdrawSummaryRecordsLength(user));
-        const records = await readInBatches(length, async (index) => {
-          const [summary, flush] = await Promise.all([
-            referral.getUserWithdrawSummaryRecordAt(user, index),
-            referral.getUserWithdrawSummaryFlushAt(user, index),
-          ]);
-          return { summary, flush, recordIndex: index };
-        });
-        const totals = [0n, 0n, 0n, 0n, 0n];
-        const rows = [];
-        records.forEach(({ summary, flush, recordIndex }) => {
-          const timestamp = Number(summary.timestamp ?? summary[7] ?? 0n);
-          for (let type = 0; type < labels.length; type += 1) {
-            const amount = BigInt(flush[type] ?? 0n);
-            if (amount === 0n) continue;
-            totals[type] += amount;
-            rows.push({
-              source: "V1 (Legacy)",
-              type: labels[type],
-              typeOrder: type,
-              amount: formatAmount(amount),
-              timestamp,
-              time: formatTime(timestamp),
-              recordIndex,
-            });
-          }
-        });
-        return { totals, rows };
-      };
-
-      const readV2 = async (provider) => {
-        const flushLedger = new ethers.Contract(V2FlushLedgerAddress, V2FlushLedgerABI, provider);
+      const readFlushLedger = async (ledgerAddress, provider) => {
+        const flushLedger = new ethers.Contract(ledgerAddress, V2FlushLedgerABI, provider);
         const [totals, historyLength] = await Promise.all([
           Promise.all(labels.map((_, type) => flushLedger.totalFlushedIncome(user, type))),
           flushLedger.getFlushHistoryLength(user),
@@ -100,22 +61,21 @@ export const FlushIncome = () => {
         return { totals, records };
       };
 
-      const v1Promise = readV1();
-      let v2Snapshot;
-      try {
-        v2Snapshot = await readV2(createBscReadProvider());
-      } catch {
-        v2Snapshot = await readV2(createBackupReadProvider());
-      }
-      const v1Snapshot = await v1Promise;
-
-      setV1Summary(v1Snapshot.totals.map(formatAmount));
-      setV2Summary(v2Snapshot.totals.map(formatAmount));
-      const v2Rows = v2Snapshot.records.map(({ record, recordIndex }) => {
+      const readWithFallback = async (ledgerAddress) => {
+        try { return await readFlushLedger(ledgerAddress, createBscReadProvider()); }
+        catch { return readFlushLedger(ledgerAddress, createBackupReadProvider()); }
+      };
+      const [v2Result, v3Result] = await Promise.allSettled([
+        readWithFallback(LegacyV2FlushLedgerAddress),
+        readWithFallback(V2FlushLedgerAddress),
+      ]);
+      const v2Snapshot = v2Result.status === "fulfilled" ? v2Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
+      const v3Snapshot = v3Result.status === "fulfilled" ? v3Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
+      setSummary(v2Snapshot.totals.map((total, index) => formatAmount(total + v3Snapshot.totals[index])));
+      const toRows = (snapshot) => snapshot.records.map(({ record, recordIndex }) => {
         const typeOrder = Number(record.incomeType);
         const timestamp = Number(record.timestamp ?? 0n);
         return {
-          source: "V2 (New)",
           type: labels[typeOrder] || "Unknown",
           typeOrder,
           amount: formatAmount(record.amount),
@@ -125,16 +85,18 @@ export const FlushIncome = () => {
         };
       });
 
-      const combinedRows = [...v1Snapshot.rows, ...v2Rows]
+      const combinedRows = [...toRows(v2Snapshot), ...toRows(v3Snapshot)]
         .sort((a, b) => {
           if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
           if (a.recordIndex !== b.recordIndex) return b.recordIndex - a.recordIndex;
-          if (a.source !== b.source) return a.source === "V2 (New)" ? -1 : 1;
           return a.typeOrder - b.typeOrder;
         })
         .map((row, index) => ({ ...row, sno: index + 1 }));
 
       setRows(combinedRows);
+      if (v2Result.status === "rejected" || v3Result.status === "rejected") {
+        setMessage("Some Flush history data could not be loaded. Please refresh.");
+      }
     } catch (error) {
       setMessage(error?.shortMessage || error?.message || "Could not refresh Flush history. Please try Refresh again.");
     } finally {
@@ -160,8 +122,7 @@ export const FlushIncome = () => {
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
         {labels.map((label, index) => (
           <React.Fragment key={label}>
-            <div className="withdrawal-card"><p className="withdrawal-card-title">V1 {label} Flushed</p><h4 className="withdrawal-card-value">{v1Summary[index]} USDT</h4></div>
-            <div className="withdrawal-card"><p className="withdrawal-card-title">V2 {label} Flushed</p><h4 className="withdrawal-card-value">{v2Summary[index]} USDT</h4></div>
+            <div className="withdrawal-card"><p className="withdrawal-card-title">{label} Flushed</p><h4 className="withdrawal-card-value">{summary[index]}</h4></div>
           </React.Fragment>
         ))}
       </div>
@@ -170,7 +131,7 @@ export const FlushIncome = () => {
         <>
           <TableCell align="center">{row.sno}</TableCell>
           <TableCell align="center">{row.type}</TableCell>
-          <TableCell align="center">{row.amount} USDT</TableCell>
+          <TableCell align="center">{row.amount}</TableCell>
           <TableCell align="center">{row.time}</TableCell>
         </>
       )} />

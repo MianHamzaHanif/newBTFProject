@@ -11,7 +11,6 @@ import {
   PackageManagerAddress,
   V2LedgerAddress,
 } from "../../../blockchain/address";
-import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
@@ -25,22 +24,6 @@ const eventIncomeType = {
 const incomeName = ["Direct Income", "Self ROI", "Level ROI", "Power Income", "Reward Income"];
 const READ_BATCH_SIZE = 10;
 
-// Existing V1 mainnet read methods only. This UI does not change any V1/V2
-// contract state and does not require a DAO proposal.
-const V1_MANAGER_ABI = [
-  "function pendingDirectIncomeToken(address) view returns(uint256)",
-  "function totalDirectIncomeToken(address) view returns(uint256)",
-  "function totalSelfRoiIncomeClaimed(address) view returns(uint256)",
-  "function totalLevelRoiClaimed(address) view returns(uint256)",
-];
-const V1_REFERRAL_ABI = [
-  "function getSelfRoiClaimableFor(address) view returns(uint256)",
-  "function getTotalLevelRoiClaimableFor(address) view returns(uint256)",
-  "function getUserIncomeWithdrawRecordsLengthByType(address,uint8) view returns(uint256)",
-  // The type-filtered V1 getter returns four fields.  `incomeType` is an
-  // input filter and is not repeated in its result tuple.
-  "function getUserIncomeWithdrawRecordAtByType(address,uint8,uint256) view returns(address user,uint256 amount,address source,uint256 timestamp)",
-];
 
 const formatAmount = (amount) => {
   try {
@@ -55,16 +38,6 @@ const formatAmount = (amount) => {
 const formatTime = (timestamp) =>
   Number(timestamp) ? new Date(Number(timestamp) * 1000).toLocaleString() : "-";
 
-const createV1ReadProvider = () => {
-  const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
-  request.timeout = 30_000;
-  return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {
-    staticNetwork: true,
-    batchMaxCount: 1,
-    batchStallTime: 0,
-  });
-};
-
 async function readInBatches(length, readRecord) {
   const records = [];
   for (let end = length; end > 0; end -= READ_BATCH_SIZE) {
@@ -73,37 +46,6 @@ async function readInBatches(length, readRecord) {
     records.push(...await Promise.all(indexes.map(readRecord)));
   }
   return records;
-}
-
-async function readV1Income(wallet, incomeType) {
-  const provider = createV1ReadProvider();
-  const manager = new ethers.Contract(V1_MAINNET.packageManager, V1_MANAGER_ABI, provider);
-  const referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_REFERRAL_ABI, provider);
-  const pendingCall = incomeType === 0
-    ? manager.pendingDirectIncomeToken(wallet)
-    : incomeType === 1
-      ? referral.getSelfRoiClaimableFor(wallet)
-      : referral.getTotalLevelRoiClaimableFor(wallet);
-  const claimedCall = incomeType === 0
-    ? manager.totalDirectIncomeToken(wallet)
-    : incomeType === 1
-      ? manager.totalSelfRoiIncomeClaimed(wallet)
-      : manager.totalLevelRoiClaimed(wallet);
-  const [pending, claimed, lengthRaw] = await Promise.all([
-    pendingCall,
-    claimedCall,
-    referral.getUserIncomeWithdrawRecordsLengthByType(wallet, incomeType),
-  ]);
-  const records = await readInBatches(Number(lengthRaw), async (index) => {
-    const record = await referral.getUserIncomeWithdrawRecordAtByType(wallet, incomeType, index);
-    return {
-      recordSource: "v1",
-      incomeType: incomeName[incomeType],
-      amount: BigInt(record.amount ?? record[1] ?? 0n),
-      timestamp: BigInt(record.timestamp ?? record[3] ?? 0n),
-    };
-  });
-  return { pending: BigInt(pending), claimed: BigInt(claimed), records };
 }
 
 async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddress, lensAddress = "", recordSource }) {
@@ -128,10 +70,16 @@ async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddr
   });
   let ready = 0n;
   if (isFiltered) {
-    const manager = new ethers.Contract(managerAddress, V2PackageManagerABI, provider);
-    const resolvedLens = lensAddress || await manager.incomeReadyLens();
-    const lens = new ethers.Contract(resolvedLens, V2PackageManagerABI, provider);
-    ready = BigInt(await lens.getIncomeReady(wallet, incomeType));
+    // Ready amount is informational only. A missing/older lens must never
+    // hide an otherwise valid V2 claim-history table.
+    try {
+      const manager = new ethers.Contract(managerAddress, V2PackageManagerABI, provider);
+      const resolvedLens = lensAddress || await manager.incomeReadyLens();
+      const lens = new ethers.Contract(resolvedLens, V2PackageManagerABI, provider);
+      ready = BigInt(await lens.getIncomeReady(wallet, incomeType));
+    } catch {
+      ready = 0n;
+    }
   }
   return { ready, claimed: records.reduce((total, record) => total + record.amount, 0n), records };
 }
@@ -159,13 +107,12 @@ function groupSameTimeLevelRoi(records) {
 
 export default function V2ClaimHistory({ eventName = "", heading = "Claim History" }) {
   const [rows, setRows] = useState([]);
-  const [totals, setTotals] = useState({ pending: 0n, ready: 0n, claimed: 0n });
+  const [totals, setTotals] = useState({ ready: 0n, claimed: 0n });
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
   const loadHistory = useCallback(async () => {
     const incomeType = eventIncomeType[eventName];
-    const canReadV1 = incomeType !== undefined && incomeType <= 2;
     const wallet = await getReadWalletAddress();
     if (!ethers.isAddress(wallet)) {
       setRows([]);
@@ -175,8 +122,7 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
     try {
       setLoading(true);
       setMessage("");
-      const [v1Result, v2Result, v3Result] = await Promise.allSettled([
-        canReadV1 ? readV1Income(wallet, incomeType) : Promise.resolve({ pending: 0n, claimed: 0n, records: [] }),
+      const [v2Result, v3Result] = await Promise.allSettled([
         readLedgerIncome(wallet, incomeType, {
           ledgerAddress: LegacyV2LedgerAddress,
           managerAddress: LegacyV2PackageManagerAddress,
@@ -189,10 +135,9 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
           recordSource: "v3",
         }),
       ]);
-      const v1 = v1Result.status === "fulfilled" ? v1Result.value : { pending: 0n, claimed: 0n, records: [] };
       const v2 = v2Result.status === "fulfilled" ? v2Result.value : { ready: 0n, claimed: 0n, records: [] };
       const v3 = v3Result.status === "fulfilled" ? v3Result.value : { ready: 0n, claimed: 0n, records: [] };
-      const combinedRows = groupSameTimeLevelRoi([...v1.records, ...v2.records, ...v3.records])
+      const combinedRows = groupSameTimeLevelRoi([...v2.records, ...v3.records])
         .sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
         .map((record, index) => ({
           ...record,
@@ -201,14 +146,14 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
           timestampDisplay: formatTime(record.timestamp),
         }));
       setRows(combinedRows);
-      setTotals({ pending: v1.pending, ready: v2.ready + v3.ready, claimed: v1.claimed + v2.claimed + v3.claimed });
+      setTotals({ ready: v2.ready + v3.ready, claimed: v2.claimed + v3.claimed });
       const failures = [];
-      if (canReadV1 && v1Result.status === "rejected") failures.push("Legacy income data could not be loaded");
-      if (v2Result.status === "rejected" || v3Result.status === "rejected") failures.push("Some income data could not be loaded");
+      if (v2Result.status === "rejected") failures.push("V2 income history could not be loaded");
+      if (v3Result.status === "rejected") failures.push("V3 income history could not be loaded");
       setMessage(failures.length ? `${failures.join(". ")}.` : combinedRows.length ? "" : "No claim history found.");
     } catch (error) {
       setRows([]);
-      setTotals({ pending: 0n, ready: 0n, claimed: 0n });
+      setTotals({ ready: 0n, claimed: 0n });
       setMessage(error?.shortMessage || error?.reason || error?.message || "Unable to load income history.");
     } finally {
       setLoading(false);
@@ -230,7 +175,6 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
   return <div className="page-container">
     <h1>{heading}</h1>
     {hasIncomeType && <div className="withdrawal-grid mb-4">
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Pending Income</p><h4 className="withdrawal-card-value">{formatAmount(totals.pending)}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Ready Income</p><h4 className="withdrawal-card-value">{formatAmount(totals.ready)}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimed</p><h4 className="withdrawal-card-value">{formatAmount(totals.claimed)}</h4></div>
     </div>}
