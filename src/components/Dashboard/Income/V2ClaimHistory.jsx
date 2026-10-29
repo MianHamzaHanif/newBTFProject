@@ -12,6 +12,7 @@ import {
   V2LedgerAddress,
 } from "../../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
 
 const eventIncomeType = {
@@ -23,6 +24,10 @@ const eventIncomeType = {
 };
 const incomeName = ["Direct Income", "Self ROI", "Level ROI", "Power Income", "Reward Income"];
 const READ_BATCH_SIZE = 10;
+const V1_INCOME_HISTORY_ABI = [
+  "function getUserIncomeWithdrawRecordsLengthByType(address user,uint8 incomeType) view returns(uint256)",
+  "function getUserIncomeWithdrawRecordAtByType(address user,uint8 incomeType,uint256 index) view returns(address userAddress,uint256 amount,address source,uint256 timestamp)",
+];
 
 
 const formatAmount = (amount) => {
@@ -46,6 +51,32 @@ async function readInBatches(length, readRecord) {
     records.push(...await Promise.all(indexes.map(readRecord)));
   }
   return records;
+}
+
+const createV1ReadProvider = () => {
+  const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
+  request.timeout = 30_000;
+  return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, {
+    staticNetwork: true, batchMaxCount: 1, batchStallTime: 0,
+  });
+};
+
+// V1 recorded claims in ReferralNetwork rather than in an IncomeLedger. Keep
+// that historical source separate, then merge it with the two ledger eras.
+async function readV1Income(wallet, incomeType) {
+  if (incomeType === undefined) return { ready: 0n, claimed: 0n, records: [] };
+  const registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_INCOME_HISTORY_ABI, createV1ReadProvider());
+  const length = Number(await registry.getUserIncomeWithdrawRecordsLengthByType(wallet, incomeType));
+  const records = await readInBatches(length, async (index) => {
+    const record = await registry.getUserIncomeWithdrawRecordAtByType(wallet, incomeType, index);
+    return {
+      recordSource: "v1",
+      incomeType: incomeName[incomeType] || "Unknown",
+      amount: BigInt(record.amount ?? record[1] ?? 0n),
+      timestamp: BigInt(record.timestamp ?? record[3] ?? 0n),
+    };
+  });
+  return { ready: 0n, claimed: records.reduce((total, record) => total + record.amount, 0n), records };
 }
 
 async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddress, lensAddress = "", recordSource }) {
@@ -122,7 +153,8 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
     try {
       setLoading(true);
       setMessage("");
-      const [v2Result, v3Result] = await Promise.allSettled([
+      const [v1Result, v2Result, v3Result] = await Promise.allSettled([
+        readV1Income(wallet, incomeType),
         readLedgerIncome(wallet, incomeType, {
           ledgerAddress: LegacyV2LedgerAddress,
           managerAddress: LegacyV2PackageManagerAddress,
@@ -135,10 +167,17 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
           recordSource: "v3",
         }),
       ]);
+      const v1 = v1Result.status === "fulfilled" ? v1Result.value : { ready: 0n, claimed: 0n, records: [] };
       const v2 = v2Result.status === "fulfilled" ? v2Result.value : { ready: 0n, claimed: 0n, records: [] };
       const v3 = v3Result.status === "fulfilled" ? v3Result.value : { ready: 0n, claimed: 0n, records: [] };
-      const combinedRows = groupSameTimeLevelRoi([...v2.records, ...v3.records])
-        .sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
+      const sourceOrder = { v1: 0, v2: 1, v3: 2 };
+      const combinedRows = groupSameTimeLevelRoi([...v1.records, ...v2.records, ...v3.records])
+        // Keep the historic eras readable: all V1 rows, then V2, then V3.
+        // Each era itself is displayed in its real chronological order.
+        .sort((a, b) => {
+          const sourceDifference = (sourceOrder[a.recordSource] ?? 99) - (sourceOrder[b.recordSource] ?? 99);
+          return sourceDifference || Number(a.timestamp) - Number(b.timestamp);
+        })
         .map((record, index) => ({
           ...record,
           sno: index + 1,
@@ -146,8 +185,9 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
           timestampDisplay: formatTime(record.timestamp),
         }));
       setRows(combinedRows);
-      setTotals({ ready: v2.ready + v3.ready, claimed: v2.claimed + v3.claimed });
+      setTotals({ ready: v1.ready + v2.ready + v3.ready, claimed: v1.claimed + v2.claimed + v3.claimed });
       const failures = [];
+      if (v1Result.status === "rejected") failures.push("V1 income history could not be loaded");
       if (v2Result.status === "rejected") failures.push("V2 income history could not be loaded");
       if (v3Result.status === "rejected") failures.push("V3 income history could not be loaded");
       setMessage(failures.length ? `${failures.join(". ")}.` : combinedRows.length ? "" : "No claim history found.");
