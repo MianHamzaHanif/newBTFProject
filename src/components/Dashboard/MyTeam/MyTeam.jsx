@@ -9,7 +9,7 @@ import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import {
   PackageManagerAddress,
-  ReferralNetworkAddress,
+  V3ReferralRegistryAddress,
 } from "../../../blockchain/address";
 import { getReadWalletAddress } from "../../../blockchain/readProvider";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
@@ -204,7 +204,7 @@ export const MyTeam = () => {
 
       const provider = createV2ReadProvider();
       const referralContract = new ethers.Contract(
-        ReferralNetworkAddress,
+        V3ReferralRegistryAddress,
         ReferralNetworkABI,
         provider,
       );
@@ -286,7 +286,7 @@ export const MyTeam = () => {
         setLoadError("");
 
         const provider = createV2ReadProvider();
-        const v2ReferralContract = new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, provider);
+        const v2ReferralContract = new ethers.Contract(V3ReferralRegistryAddress, V2RegistryABI, provider);
         const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
         const v1Provider = createV1ReadProvider();
         const v1ReferralContract = new ethers.Contract(
@@ -356,9 +356,9 @@ export const MyTeam = () => {
         setRows(nextRows);
         const sourceFailures = [
           v1Result.status === "rejected" ? "V1 team RPC did not respond" : "",
-          v2Result.status === "rejected" ? "V2 team RPC did not respond" : "",
+          v2Result.status === "rejected" ? "V3 team RPC did not respond" : "",
         ].filter(Boolean);
-        const sourceNote = `V1: ${v1Addresses.length}, V2: ${v2Addresses.length}, merged: ${merged.size} for ${formatAddressShort(walletAddress)}.`;
+        const sourceNote = `${merged.size} team users found for ${formatAddressShort(walletAddress)}.`;
         if (nextRows.length === 0 && merged.size > 0) {
           setLoadError("Team users were found, but package details could not be read. Refresh and try again.");
         } else if (sourceFailures.length) {

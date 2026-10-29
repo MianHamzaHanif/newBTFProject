@@ -6,9 +6,11 @@ import { ethers } from "ethers";
 import { clearRememberedWalletAddress, rememberWalletAddress } from "../../../blockchain/readProvider";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
-import { ReferralNetworkAddress } from "../../../blockchain/address";
+import { ReferralNetworkAddress, V3ActionsEnabled } from "../../../blockchain/address";
 import { readRegistration, readV1Registration } from "../../../blockchain/registrationReader";
 import { canAccessDashboardWithoutRegistration } from "../../../blockchain/migrationAccess";
+
+const REGISTRATION_PAUSED = !V3ActionsEnabled;
 
 const Login = () => {
   const navigate = useNavigate();
@@ -151,6 +153,10 @@ const Login = () => {
   };
 
   const handleRegister = async () => {
+    if (REGISTRATION_PAUSED) {
+      showRegisterMessage("Registration is temporarily unavailable while system migration is under construction. Please check back soon.");
+      return;
+    }
     if (isRegistering || registrationStatus !== "unregistered") return;
     const referral = referralAddress.trim();
     setRegisterMessage({ text: "", type: "" });
@@ -372,9 +378,12 @@ const Login = () => {
           {walletAddress && (
             <>
               {registrationStatus === "unregistered" && (
-              <button onClick={handleRegister} disabled={isRegistering || registrationStatus !== "unregistered"}>
-                {isRegistering ? "Registering..." : "Register"}
-              </button>
+                <>
+                  <button onClick={handleRegister} disabled={REGISTRATION_PAUSED || isRegistering || registrationStatus !== "unregistered"}>
+                    {REGISTRATION_PAUSED ? "Registration Paused" : isRegistering ? "Registering..." : "Register"}
+                  </button>
+                  {REGISTRATION_PAUSED && <p className="register-message error">Registration is temporarily unavailable while system migration is under construction. Please check back soon.</p>}
+                </>
               )}
               {registerMessage.text && (
                 <p className={`register-message ${registerMessage.type}`}>

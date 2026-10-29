@@ -1,14 +1,13 @@
-import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
-import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import { PackageManagerAddress, ReferralNetworkAddress } from "../../../blockchain/address";
+import { V3ReferralRegistryAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { loadPrioritizedPackageHistory } from "../../../blockchain/prioritizedPackageHistory";
 import "../styles/style.css";
 
 const V1_DIRECT_READER_ABI = [
@@ -40,35 +39,9 @@ const createV1ReadProvider = () => {
   return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
 };
 
-const combinedPackageTotal = async (address, v1Manager, v2Manager) => {
-  const [v1LengthRaw, v2LengthRaw] = await Promise.all([
-    v1Manager.getStakeHistoryLength(address).catch(() => 0n),
-    v2Manager.getPackageHistoryLength(address).catch(() => 0n),
-  ]);
-  const [v1Stakes, v2Packages] = await Promise.all([
-    readInBatches(Array.from({ length: Number(v1LengthRaw) }, (_, index) => index), (index) => v1Manager.userStakeHistory(address, index), 4),
-    readInBatches(Array.from({ length: Number(v2LengthRaw) }, (_, index) => index), (index) => readPackageHistory(v2Manager, address, index), 4),
-  ]);
-  const legacyKeys = new Map();
-  const v1Total = v1Stakes.reduce((total, stake) => {
-    const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n);
-    const timestamp = BigInt(stake?.timestamp ?? stake?.[7] ?? 0n);
-    const key = `${amount}:${timestamp}`;
-    legacyKeys.set(key, (legacyKeys.get(key) ?? 0) + 1);
-    return total + amount;
-  }, 0n);
-  const v2NewTotal = v2Packages.reduce((total, record) => {
-    const amount = BigInt(record?.amount ?? record?.[0] ?? 0n);
-    const timestamp = BigInt(record?.purchasedAt ?? record?.[1] ?? 0n);
-    const key = `${amount}:${timestamp}`;
-    const count = legacyKeys.get(key) ?? 0;
-    if (count > 0) {
-      legacyKeys.set(key, count - 1);
-      return total;
-    }
-    return total + amount;
-  }, 0n);
-  return v1Total + v2NewTotal;
+const combinedPackageTotal = async (address) => {
+  const { records } = await loadPrioritizedPackageHistory(address);
+  return records.reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
 };
 
 // A V1 active-level snapshot is copied into V2's team-deposit balance during
@@ -99,9 +72,8 @@ export const MyDirect = () => {
         if (!ethers.isAddress(walletAddress)) throw new Error("Please connect your wallet to view direct users.");
 
         const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, createV1ReadProvider());
-        const v2Registry = new ethers.Contract(ReferralNetworkAddress, V2RegistryABI, createBscReadProvider());
+        const v2Registry = new ethers.Contract(V3ReferralRegistryAddress, V2RegistryABI, createBscReadProvider());
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, createV1ReadProvider());
-        const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
         const [v1Result, v2Result] = await Promise.allSettled([
           (async () => {
             const count = Number(await v1Registry.getLevelUsersLength(walletAddress, 0));
@@ -119,7 +91,7 @@ export const MyDirect = () => {
         const v2Directs = v2Result.status === "fulfilled" ? v2Result.value : [];
         const failures = [];
         if (v1Result.status === "rejected") failures.push("V1 directs could not be loaded");
-        if (v2Result.status === "rejected") failures.push("V2 directs could not be loaded");
+        if (v2Result.status === "rejected") failures.push("V3 directs could not be loaded");
 
         const merged = new Map();
         for (const { address, user } of v1Directs) {
@@ -132,15 +104,13 @@ export const MyDirect = () => {
         const combined = await readInBatches(Array.from(merged.values()), async ({ address, v1User, v2User }) => {
           const user = v2User ?? v1User;
           const [selfBusiness, v2TeamBusiness] = await Promise.all([
-            combinedPackageTotal(address, v1Manager, v2Manager),
+            combinedPackageTotal(address),
             v2NewTeamBusiness(address, v2User, v2Registry),
           ]);
           // V1 business appears once. Only V2 business that is not the V1
           // seed is added, so seeded users cannot be displayed twice.
           const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v2TeamBusiness;
-          const source = v1User && v2User ? "V1 + V2" : v2User ? "V2" : "V1";
           return {
-            source,
             address,
             registeredAt: formatTime(user.registeredAt ?? user[2]),
             packageUsdt: formatUsdt(selfBusiness),
@@ -156,7 +126,7 @@ export const MyDirect = () => {
 
         if (cancelled) return;
         setRows(numberedRows);
-        setMessage(failures.length ? `${failures.join(". ")}. Other available directs are shown.` : numberedRows.length ? "" : "No V1 or V2 direct user found.");
+        setMessage(failures.length ? `${failures.join(". ")}. Other available directs are shown.` : numberedRows.length ? "" : "No direct user found.");
       } catch (error) {
         if (!cancelled) {
           setRows([]);
@@ -176,12 +146,12 @@ export const MyDirect = () => {
     { id: "address", label: "Wallet Address", sortable: true },
     { id: "registeredAt", label: "Register Time", sortable: true },
     { id: "packageUsdt", label: "Self Business (USDT)", sortable: true },
-    { id: "teamBusiness", label: "Team Business (V1 + V2)", sortable: true },
+    { id: "teamBusiness", label: "Team Business", sortable: true },
     { id: "totalTeam", label: "Total Team", sortable: true },
   ];
 
   return <div className="page-container"><h1>My Direct</h1><div className="table-wrapper"><div className="table-card">
-    {isLoading && <p className="team-loading">Loading V1 and V2 direct users...</p>}
+    {isLoading && <p className="team-loading">Loading direct users...</p>}
     {!isLoading && message && <p className="team-loading">{message}</p>}
     <CustomTable columns={columns} rows={rows} renderRow={(row) => <>
       <TableCell align="center">{row.sno}</TableCell>

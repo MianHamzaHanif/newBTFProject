@@ -7,14 +7,19 @@ import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
 import TestUsdtABI from "../../../blockchain/testUsdtABI";
 import {
   HasTestUsdtFaucet,
+  IncomeReadyLensAddress,
   PackageManagerAddress,
   TokenAddress,
   V2LedgerAddress,
-  V2LegacyRankCheckpointAddress
+  V2LegacyRankCheckpointAddress,
+  V3ActionsEnabled
 } from "../../../blockchain/address";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
+
+const CLAIMS_PAUSED = !V3ActionsEnabled;
+const MIGRATION_PAUSED_MESSAGE = "Claiming is temporarily unavailable while system migration is under construction. Please check back soon.";
 
 const claimActions = [
   { method: "claimDirectIncome", incomeType: 0, label: "Direct Income" },
@@ -102,11 +107,7 @@ export default function V2ClaimIncome() {
         ["function getIncomeReady(address user,uint8 incomeType) view returns (uint256)"],
         createBscReadProvider()
       );
-      const incomeLens = new ethers.Contract(
-        await packageManager.incomeReadyLens(),
-        V2PackageManagerABI,
-        createBscReadProvider()
-      );
+      const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, createBscReadProvider());
       const readProvider = createBscReadProvider();
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
       const checkpoint = ethers.isAddress(V2LegacyRankCheckpointAddress)
@@ -197,6 +198,10 @@ export default function V2ClaimIncome() {
   }, [loadClaimData]);
 
   const claim = async (method) => {
+    if (CLAIMS_PAUSED) {
+      setMessage(MIGRATION_PAUSED_MESSAGE);
+      return;
+    }
     const row = rows.find((entry) => entry.method === method);
     if (!row || BigInt(row.readyAmount ?? 0n) === 0n) {
       setMessage(`No ${row?.incomeType || "income"} is ready to claim.`);
@@ -283,6 +288,7 @@ export default function V2ClaimIncome() {
       <h1>Claim V2 Income</h1>
       <div className="table-wrapper">
         <div className="table-card">
+          {CLAIMS_PAUSED && <p className="team-loading">{MIGRATION_PAUSED_MESSAGE}</p>}
           <button className="btn btn-outline-primary mb-3" onClick={loadClaimData} disabled={loading || Boolean(pendingMethod)}>
             {loading ? "Loading..." : "Refresh Amounts"}
           </button>
@@ -299,10 +305,10 @@ export default function V2ClaimIncome() {
                 <TableCell align="center">
                   <button
                     className="btn btn-primary btn-sm"
-                    disabled={Boolean(pendingMethod) || BigInt(row.readyAmount ?? 0n) === 0n}
+                    disabled={CLAIMS_PAUSED || Boolean(pendingMethod) || BigInt(row.readyAmount ?? 0n) === 0n}
                     onClick={() => claim(row.method)}
                   >
-                    {pendingMethod === row.method ? "Claiming..." : "Claim"}
+                    {CLAIMS_PAUSED ? "Claim Paused" : pendingMethod === row.method ? "Claiming..." : "Claim"}
                   </button>
                 </TableCell>
               </>

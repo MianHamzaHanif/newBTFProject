@@ -6,7 +6,15 @@ import { getReadWalletAddress } from "../../../blockchain/readProvider";
 import { canAccessMigration } from "../../../blockchain/migrationAccess";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
-import { ReferralNetworkAddress, PackageManagerAddress, V2LedgerAddress, V2ManualLegacyImporterAddress, V2VerifiedLegacyImporterAddress, V2VerifiedLegacyRankImporterAddress, V2ManualLegacyLevelBridgeAddress } from "../../../blockchain/address";
+import {
+  LegacyV2RegistryAddress as ReferralNetworkAddress,
+  LegacyV2PackageManagerAddress as PackageManagerAddress,
+  LegacyV2LedgerAddress as V2LedgerAddress,
+  V2ManualLegacyImporterAddress,
+  V2VerifiedLegacyImporterAddress,
+  V2VerifiedLegacyRankImporterAddress,
+  V2ManualLegacyLevelBridgeAddress
+} from "../../../blockchain/address";
 import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import "./MigrationData.css";
 import "../styles/style.css";

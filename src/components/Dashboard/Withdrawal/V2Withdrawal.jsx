@@ -3,7 +3,7 @@ import { ethers } from "ethers";
 import { useLocation } from "react-router-dom";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
-import { PackageManagerAddress, ReferralNetworkAddress, V2DaoAddress, V2LedgerAddress } from "../../../blockchain/address";
+import { PackageManagerAddress, ReferralNetworkAddress, SettlementTokenSymbol, V2DaoAddress, V2LedgerAddress, V3ActionsEnabled } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
@@ -15,6 +15,8 @@ const V1_MIN_WITHDRAWAL = 10n ** 19n; // 10 USDT, token has 18 decimals
 // on-chain value configured later.
 const V2_UI_MIN_WITHDRAWAL = 10n ** 18n;
 const V1_WITHDRAWAL_CAP_BP = 90n;
+const WITHDRAWALS_PAUSED = !V3ActionsEnabled;
+const MIGRATION_PAUSED_MESSAGE = "Withdrawal is temporarily unavailable while system migration is under construction. Please check back soon.";
 
 const formatUsdt = (value) => {
   try {
@@ -352,6 +354,10 @@ export default function V2Withdrawal() {
   const v1TotalClaimable = BigInt(v1Overview?.totalClaimable ?? 0n);
 
   const withdraw = async () => {
+    if (WITHDRAWALS_PAUSED) {
+      setMessage(MIGRATION_PAUSED_MESSAGE);
+      return;
+    }
     if (!window.ethereum) {
       setMessage("MetaMask or Trust Wallet is not available.");
       return;
@@ -361,7 +367,7 @@ export default function V2Withdrawal() {
       return;
     }
     if (pending < minimumWithdraw) {
-      setMessage(`Minimum V2 withdrawal is ${formatUsdt(minimumWithdraw)} USDT.`);
+      setMessage(`Minimum withdrawal is ${formatUsdt(minimumWithdraw)} ${SettlementTokenSymbol}.`);
       return;
     }
 
@@ -383,7 +389,7 @@ export default function V2Withdrawal() {
         return;
       }
       if (signerBalance < minimumWithdraw) {
-        setMessage(`Minimum V2 withdrawal is ${formatUsdt(minimumWithdraw)} USDT.`);
+        setMessage(`Minimum withdrawal is ${formatUsdt(minimumWithdraw)} ${SettlementTokenSymbol}.`);
         return;
       }
       // Surface a contract revert before opening the wallet's transaction
@@ -402,6 +408,10 @@ export default function V2Withdrawal() {
   };
 
   const withdrawV1 = async () => {
+    if (WITHDRAWALS_PAUSED) {
+      setV1Message(MIGRATION_PAUSED_MESSAGE);
+      return;
+    }
     if (v1NinetyPercentReached) {
       setV1Message("Your 90% V1 income limit is reached. Buy a new package to withdraw the next amount.");
       return;
@@ -464,6 +474,7 @@ export default function V2Withdrawal() {
             {v1Loading ? "Loading..." : "Refresh"}
           </button>
         </div>
+        {WITHDRAWALS_PAUSED ? <p className="team-loading withdraw-status">{MIGRATION_PAUSED_MESSAGE}</p> : null}
         {v1Message ? <p className="team-loading">{v1Message}</p> : null}
         <div className="withdrawal-grid">
           <div className="withdrawal-card"><p className="withdrawal-card-title">Direct Claimable</p><h4 className="withdrawal-card-value">{formatUsdt(v1Overview?.directClaimable)} USDT</h4></div>
@@ -481,8 +492,8 @@ export default function V2Withdrawal() {
           <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimable Income</p><h4 className="withdrawal-card-value">{formatUsdt(v1TotalClaimable)} USDT</h4></div>
         </div>
         <div className="withdraw-action-wrap">
-          <button className="custom-button withdraw-btn" onClick={withdrawV1} disabled={v1Loading || v1Withdrawing || v1NinetyPercentReached || BigInt(v1Overview?.totalClaimable ?? 0n) < V1_MIN_WITHDRAWAL}>
-            {v1Withdrawing ? "Withdrawing..." : "Withdraw V1"}
+          <button className="custom-button withdraw-btn" onClick={withdrawV1} disabled={WITHDRAWALS_PAUSED || v1Loading || v1Withdrawing || v1NinetyPercentReached || BigInt(v1Overview?.totalClaimable ?? 0n) < V1_MIN_WITHDRAWAL}>
+            {WITHDRAWALS_PAUSED ? "Withdrawal Paused" : v1Withdrawing ? "Withdrawing..." : "Withdraw V1"}
           </button>
           {v1NinetyPercentReached
             ? <p className="team-loading withdraw-status">Your 90% V1 income limit is reached. Buy a new package to withdraw the next amount.</p>
@@ -497,6 +508,7 @@ export default function V2Withdrawal() {
           {loading ? "Loading..." : "Refresh"}
         </button>
       </div>
+      {WITHDRAWALS_PAUSED ? <p className="team-loading withdraw-status">{MIGRATION_PAUSED_MESSAGE}</p> : null}
       <div className="withdrawal-grid">
         <div className="withdrawal-card">
           <p className="withdrawal-card-title">V2 Pending Withdrawal</p>
@@ -512,8 +524,8 @@ export default function V2Withdrawal() {
         </div>
       </div>
       <div className="withdraw-action-wrap">
-        <button className="custom-button withdraw-btn" onClick={withdraw} disabled={withdrawing || pending < minimumWithdraw}>
-          {withdrawing ? "Withdrawing..." : "Withdraw V2"}
+        <button className="custom-button withdraw-btn" onClick={withdraw} disabled={WITHDRAWALS_PAUSED || withdrawing || pending < minimumWithdraw}>
+          {WITHDRAWALS_PAUSED ? "Withdrawal Paused" : withdrawing ? "Withdrawing..." : "Withdraw V2"}
         </button>
         {message ? <p className="team-loading withdraw-status">{message}</p> : null}
       </div>

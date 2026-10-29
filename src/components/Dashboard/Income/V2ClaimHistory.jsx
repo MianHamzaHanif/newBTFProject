@@ -4,7 +4,13 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
-import { PackageManagerAddress, V2LedgerAddress } from "../../../blockchain/address";
+import {
+  IncomeReadyLensAddress,
+  LegacyV2LedgerAddress,
+  LegacyV2PackageManagerAddress,
+  PackageManagerAddress,
+  V2LedgerAddress,
+} from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
@@ -91,7 +97,7 @@ async function readV1Income(wallet, incomeType) {
   const records = await readInBatches(Number(lengthRaw), async (index) => {
     const record = await referral.getUserIncomeWithdrawRecordAtByType(wallet, incomeType, index);
     return {
-      network: "V1 (Legacy)",
+      recordSource: "v1",
       incomeType: incomeName[incomeType],
       amount: BigInt(record.amount ?? record[1] ?? 0n),
       timestamp: BigInt(record.timestamp ?? record[3] ?? 0n),
@@ -100,9 +106,9 @@ async function readV1Income(wallet, incomeType) {
   return { pending: BigInt(pending), claimed: BigInt(claimed), records };
 }
 
-async function readV2Income(wallet, incomeType) {
+async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddress, lensAddress = "", recordSource }) {
   const provider = createBscReadProvider();
-  const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, provider);
+  const ledger = new ethers.Contract(ledgerAddress, V2IncomeLedgerABI, provider);
   const isFiltered = incomeType !== undefined;
   const lengthRaw = isFiltered
     ? await ledger.getUserIncomeHistoryLengthByType(wallet, incomeType)
@@ -112,7 +118,7 @@ async function readV2Income(wallet, incomeType) {
       ? await ledger.getUserIncomeHistoryAtByType(wallet, incomeType, index)
       : await ledger.getUserIncomeHistoryAt(wallet, index);
     return {
-      network: "V2 (New)",
+      recordSource,
       incomeType: isFiltered
         ? incomeName[incomeType]
         : incomeName[Number(record.incomeType ?? record[0])] || "Unknown",
@@ -122,8 +128,9 @@ async function readV2Income(wallet, incomeType) {
   });
   let ready = 0n;
   if (isFiltered) {
-    const manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
-    const lens = new ethers.Contract(await manager.incomeReadyLens(), V2PackageManagerABI, provider);
+    const manager = new ethers.Contract(managerAddress, V2PackageManagerABI, provider);
+    const resolvedLens = lensAddress || await manager.incomeReadyLens();
+    const lens = new ethers.Contract(resolvedLens, V2PackageManagerABI, provider);
     ready = BigInt(await lens.getIncomeReady(wallet, incomeType));
   }
   return { ready, claimed: records.reduce((total, record) => total + record.amount, 0n), records };
@@ -139,7 +146,7 @@ function groupSameTimeLevelRoi(records) {
       grouped.set(`row:${grouped.size}`, record);
       continue;
     }
-    const key = `level-roi:${record.timestamp}`;
+    const key = `level-roi:${record.recordSource || "v1"}:${record.timestamp}`;
     const existing = grouped.get(key);
     if (existing) {
       existing.amount += record.amount;
@@ -152,7 +159,7 @@ function groupSameTimeLevelRoi(records) {
 
 export default function V2ClaimHistory({ eventName = "", heading = "Claim History" }) {
   const [rows, setRows] = useState([]);
-  const [totals, setTotals] = useState({ v1Pending: 0n, v1Claimed: 0n, v2Ready: 0n, v2Claimed: 0n });
+  const [totals, setTotals] = useState({ pending: 0n, ready: 0n, claimed: 0n });
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -168,13 +175,24 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
     try {
       setLoading(true);
       setMessage("");
-      const [v1Result, v2Result] = await Promise.allSettled([
+      const [v1Result, v2Result, v3Result] = await Promise.allSettled([
         canReadV1 ? readV1Income(wallet, incomeType) : Promise.resolve({ pending: 0n, claimed: 0n, records: [] }),
-        readV2Income(wallet, incomeType),
+        readLedgerIncome(wallet, incomeType, {
+          ledgerAddress: LegacyV2LedgerAddress,
+          managerAddress: LegacyV2PackageManagerAddress,
+          recordSource: "v2",
+        }),
+        readLedgerIncome(wallet, incomeType, {
+          ledgerAddress: V2LedgerAddress,
+          managerAddress: PackageManagerAddress,
+          lensAddress: IncomeReadyLensAddress,
+          recordSource: "v3",
+        }),
       ]);
       const v1 = v1Result.status === "fulfilled" ? v1Result.value : { pending: 0n, claimed: 0n, records: [] };
       const v2 = v2Result.status === "fulfilled" ? v2Result.value : { ready: 0n, claimed: 0n, records: [] };
-      const combinedRows = groupSameTimeLevelRoi([...v1.records, ...v2.records])
+      const v3 = v3Result.status === "fulfilled" ? v3Result.value : { ready: 0n, claimed: 0n, records: [] };
+      const combinedRows = groupSameTimeLevelRoi([...v1.records, ...v2.records, ...v3.records])
         .sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
         .map((record, index) => ({
           ...record,
@@ -183,14 +201,14 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
           timestampDisplay: formatTime(record.timestamp),
         }));
       setRows(combinedRows);
-      setTotals({ v1Pending: v1.pending, v1Claimed: v1.claimed, v2Ready: v2.ready, v2Claimed: v2.claimed });
+      setTotals({ pending: v1.pending, ready: v2.ready + v3.ready, claimed: v1.claimed + v2.claimed + v3.claimed });
       const failures = [];
-      if (canReadV1 && v1Result.status === "rejected") failures.push("V1 data could not be loaded");
-      if (v2Result.status === "rejected") failures.push("V2 data could not be loaded");
-      setMessage(failures.length ? `${failures.join(". ")}.` : combinedRows.length ? "" : "No V1 or V2 claim history found.");
+      if (canReadV1 && v1Result.status === "rejected") failures.push("Legacy income data could not be loaded");
+      if (v2Result.status === "rejected" || v3Result.status === "rejected") failures.push("Some income data could not be loaded");
+      setMessage(failures.length ? `${failures.join(". ")}.` : combinedRows.length ? "" : "No claim history found.");
     } catch (error) {
       setRows([]);
-      setTotals({ v1Pending: 0n, v1Claimed: 0n, v2Ready: 0n, v2Claimed: 0n });
+      setTotals({ pending: 0n, ready: 0n, claimed: 0n });
       setMessage(error?.shortMessage || error?.reason || error?.message || "Unable to load income history.");
     } finally {
       setLoading(false);
@@ -205,17 +223,16 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "incomeType", label: "Income Type", sortable: true },
-    { id: "amountDisplay", label: "Claimed USDT", sortable: true },
+    { id: "amountDisplay", label: "Claimed Amount", sortable: true },
     { id: "timestampDisplay", label: "Claim Time", sortable: true },
   ];
 
   return <div className="page-container">
     <h1>{heading}</h1>
     {hasIncomeType && <div className="withdrawal-grid mb-4">
-      <div className="withdrawal-card"><p className="withdrawal-card-title">V1 Pending</p><h4 className="withdrawal-card-value">{formatAmount(totals.v1Pending)} USDT</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">V1 Claimed</p><h4 className="withdrawal-card-value">{formatAmount(totals.v1Claimed)} USDT</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">V2 Ready</p><h4 className="withdrawal-card-value">{formatAmount(totals.v2Ready)} USDT</h4></div>
-      <div className="withdrawal-card"><p className="withdrawal-card-title">V2 Claimed</p><h4 className="withdrawal-card-value">{formatAmount(totals.v2Claimed)} USDT</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Pending Income</p><h4 className="withdrawal-card-value">{formatAmount(totals.pending)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Ready Income</p><h4 className="withdrawal-card-value">{formatAmount(totals.ready)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Total Claimed</p><h4 className="withdrawal-card-value">{formatAmount(totals.claimed)}</h4></div>
     </div>}
     <div className="table-wrapper"><div className="table-card">
       <button className="btn btn-primary mb-3" onClick={loadHistory} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>

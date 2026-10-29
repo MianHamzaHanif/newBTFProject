@@ -14,13 +14,14 @@ import {
   PackageManagerAddress,
   ReferralNetworkAddress,
   TokenAddress,
+  SettlementTokenSymbol,
   V2LedgerAddress,
   V2VerifiedLegacyImporterAddress,
 } from "../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 
-const TOKEN_LABEL = "USDT";
+const TOKEN_LABEL = SettlementTokenSymbol;
 const LEGACY_IMPORT_EVENT = new ethers.Interface([
   "event LegacyPackageSnapshotImported(address indexed user,uint256 indexed sourceIndex,uint256 amount,uint256 usedIncome)",
 ]);

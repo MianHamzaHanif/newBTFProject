@@ -12,7 +12,7 @@ const DAO_ABI = [
 ];
 const REGISTRY_ABI = ["function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)"];
 // Only the currently approved live proposal should trigger the voting prompt.
-const LIVE_PROPOSAL_IDS = [22n];
+const LIVE_PROPOSAL_IDS = [23n];
 
 export default function DaoVotingPrompt() {
   const navigate = useNavigate();

@@ -5,7 +5,7 @@ import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
-import { PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
+import { IncomeReadyLensAddress, PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 
 const E18 = 10n ** 18n;
@@ -64,7 +64,7 @@ export const Income6 = () => {
         if (!user || !ethers.isAddress(user)) return;
         const provider = createBscReadProvider();
         const manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, provider);
-        const incomeLens = new ethers.Contract(await manager.incomeReadyLens(), V2PackageManagerABI, provider);
+        const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, provider);
         const registry = new ethers.Contract(ReferralNetworkAddress, V2ReferralRegistryABI, provider);
         const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, provider);
         const [countRaw, rewardReady, roiDayRaw, legacyBaseline, legacyBaselineCount] = await Promise.all([

@@ -2,6 +2,9 @@ import React, { useState } from "react";
 import image from "/dashboardimg/logo.png";
 import "./signup.css";
 import { Link, Links } from "react-router-dom";
+import { V3ActionsEnabled } from "../../../blockchain/address";
+
+const REGISTRATION_PAUSED = !V3ActionsEnabled;
 
 const Signup = () => {
   const [registerPopOpen, setRegisterPopOpen] = useState(false);
@@ -55,7 +58,8 @@ const Signup = () => {
         </div>
         <div className="signup-card">
           <h1>Access To Your Personal Account</h1>
-          <button onClick={() => setRegisterPopOpen(true)}>Register </button>
+          <button disabled={REGISTRATION_PAUSED}>Registration Paused</button>
+          {REGISTRATION_PAUSED && <p className="signup-text">Registration is temporarily unavailable while system migration is under construction. Please check back soon.</p>}
 
           {registerPopOpen && (
             <div className="modal-overlay">

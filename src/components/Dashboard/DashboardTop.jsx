@@ -13,10 +13,13 @@ import V2IncomeLedgerABI from "../../blockchain/v2IncomeLedgerABI";
 import {
   PackageManagerAddress,
   PackageManagerLensAddress,
+  IncomeReadyLensAddress,
   ReferralNetworkAddress,
   TokenAddress,
+  SettlementTokenSymbol,
   V2LedgerAddress,
   V2VerifiedLegacyImporterAddress,
+  V3ActionsEnabled,
 } from "../../blockchain/address";
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscMainnetConfig";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
@@ -25,6 +28,8 @@ import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/re
 const LEGACY_IMPORT_EVENT = new ethers.Interface([
   "event LegacyPackageSnapshotImported(address indexed user,uint256 indexed sourceIndex,uint256 amount,uint256 usedIncome)",
 ]);
+
+const PACKAGE_PURCHASE_PAUSED = !V3ActionsEnabled;
 
 // A migrated V1 package is already represented by its V2 package. Read the
 // importer event so it contributes to investment (and the 3x limit) once.
@@ -59,7 +64,7 @@ const DashboardTop = () => {
   const [planActivity, setPlanActivity] = useState({
     progressText: "0% / 0%",
     activeStakeLabel: "No active package",
-    selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
+    selfRoiReadyLabel: `Current Self ROI Ready: 0.0000 ${SettlementTokenSymbol}`,
     remainingSeconds: 0,
   });
   const [dayCycle, setDayCycle] = useState({
@@ -130,7 +135,7 @@ const DashboardTop = () => {
       setPlanActivity({
         progressText: "0% / 0%",
         activeStakeLabel: "No active package",
-        selfRoiReadyLabel: "Current Self ROI Ready: 0.0000 USDT",
+        selfRoiReadyLabel: `Current Self ROI Ready: 0.0000 ${SettlementTokenSymbol}`,
         remainingSeconds: 0,
       });
       setIsPlanLoading(false);
@@ -203,7 +208,7 @@ const DashboardTop = () => {
       if (!wallet || !ethers.isAddress(wallet)) throw new Error("WALLET");
       const v2Provider = createBscReadProvider();
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
-      const v2Lens = new ethers.Contract(await v2Manager.incomeReadyLens(), V2PackageManagerABI, v2Provider);
+      const v2Lens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, v2Provider);
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
       {
       const [currentPackage, limit, used, selfReady, roiDay, startTime, block] = await Promise.all([
@@ -507,7 +512,7 @@ const DashboardTop = () => {
       }
       const v2WarningProvider = createBscReadProvider();
       const v2WarningManager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2WarningProvider);
-      const v2WarningLens = new ethers.Contract(await v2WarningManager.incomeReadyLens(), V2PackageManagerABI, v2WarningProvider);
+      const v2WarningLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, v2WarningProvider);
       const v2WarningLedger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2WarningProvider);
       const [limit, historyLengthRaw, incomeHistoryLengthRaw, directReady, selfRoiReady, levelRoiReady, powerReady, rewardReady] = await Promise.all([
         v2WarningManager.totalIncomeLimit(wallet),
@@ -770,6 +775,10 @@ const DashboardTop = () => {
   };
 
   const handleBuyPackage = async () => {
+    if (PACKAGE_PURCHASE_PAUSED) {
+      setBuyStatus("Package purchase is temporarily unavailable while system migration is under construction. Please check back soon.");
+      return;
+    }
     if (!window.ethereum) {
       setBuyStatus("MetaMask not found.");
       return;
@@ -815,13 +824,13 @@ const DashboardTop = () => {
 
       if (purchaseSafety.blocked) {
         setBuyStatus(
-          `Package activation is paused. Only ${ethers.formatEther(purchaseSafety.effectiveRemaining)} USDT will remain after pending income. Wait for the income cycle to complete, withdraw the full available income, then activate a new package.`,
+          `Package activation is paused. Only ${ethers.formatEther(purchaseSafety.effectiveRemaining)} ${SettlementTokenSymbol} will remain after pending income. Wait for the income cycle to complete, withdraw the full available income, then activate a new package.`,
         );
         return;
       }
 
-      // Check the exact USDT allowance first. A new wallet needs an
-      // approval transaction before Package Manager can transfer its USDT.
+      // Check the settlement-token allowance first. A new wallet needs an
+      // approval transaction before Package Manager can transfer its token.
       const tokenReadContract = new ethers.Contract(
           TokenAddress,
           [
@@ -832,7 +841,7 @@ const DashboardTop = () => {
           ],
           registrationProvider,
       );
-      setBuyStatus("Checking USDT balance and approval...");
+      setBuyStatus(`Checking ${SettlementTokenSymbol} balance and approval...`);
       const [tokenDecimals, tokenBalance, currentAllowance] = await Promise.all([
           tokenReadContract.decimals(),
           tokenReadContract.balanceOf(userAddress),
@@ -842,13 +851,13 @@ const DashboardTop = () => {
 
       if (tokenBalance < directPackageAmount) {
         setBuyStatus(
-            `Insufficient USDT balance. ${selectedPackage} USDT is required for this package.`,
+            `Insufficient ${SettlementTokenSymbol} balance. ${selectedPackage} ${SettlementTokenSymbol} is required for this package.`,
         );
         return;
       }
 
       if (currentAllowance < directPackageAmount) {
-        setBuyStatus("Approve USDT in your wallet first...");
+        setBuyStatus(`Approve ${SettlementTokenSymbol} in your wallet first...`);
         const tokenInterface = new ethers.Interface([
           "function approve(address spender,uint256 amount) returns (bool)",
         ]);
@@ -860,16 +869,16 @@ const DashboardTop = () => {
             data: tokenInterface.encodeFunctionData("approve", [PackageManagerAddress, directPackageAmount]),
           }],
         });
-        setBuyStatus("Waiting for USDT approval confirmation...");
+        setBuyStatus(`Waiting for ${SettlementTokenSymbol} approval confirmation...`);
         const approveReceipt = await waitForWalletReceipt(approveHash);
         if (!approveReceipt || Number(approveReceipt.status) !== 1) {
-          setBuyStatus("USDT approval is pending or failed. Check wallet Activity, then try Buy again.");
+          setBuyStatus(`${SettlementTokenSymbol} approval is pending or failed. Check wallet Activity, then try Buy again.`);
           return;
         }
         // Let the status render before asking MetaMask for the second
         // signature. This avoids mobile MetaMask swallowing the Buy popup
         // immediately after the approval popup closes.
-        setBuyStatus("USDT approved. Opening Buy confirmation in your wallet...");
+        setBuyStatus(`${SettlementTokenSymbol} approved. Opening Buy confirmation in your wallet...`);
         await new Promise((resolve) => window.setTimeout(resolve, 150));
       }
 
@@ -929,6 +938,7 @@ const DashboardTop = () => {
           className="package-select"
           value={selectedPackage}
           onChange={(e) => setSelectedPackage(e.target.value)}
+          disabled={PACKAGE_PURCHASE_PAUSED}
         >
           {packageOptions.map((value) => (
             <option key={value} value={value}>
@@ -936,9 +946,10 @@ const DashboardTop = () => {
             </option>
           ))}
         </select>
-        <button className="create-btn" onClick={handleBuyPackage} disabled={isBuying}>
-          {isBuying ? "Processing..." : "Buy"}
+        <button className="create-btn" onClick={handleBuyPackage} disabled={PACKAGE_PURCHASE_PAUSED || isBuying}>
+          {PACKAGE_PURCHASE_PAUSED ? "Purchase Paused" : isBuying ? "Processing..." : "Buy"}
         </button>
+        {PACKAGE_PURCHASE_PAUSED && <p className="buy-status">Package purchase is temporarily unavailable while system migration is under construction. Please check back soon.</p>}
         {buyStatus && <p className="buy-status">{buyStatus}</p>}
         {packageWarnings.map((warning) => (
           <div

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
-import { ReferralNetworkAddress } from "../../../blockchain/address";
+import { V3ReferralRegistryAddress } from "../../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
@@ -137,7 +137,7 @@ export const Tree = () => {
       return null;
     }
 
-    return new ethers.Contract(ReferralNetworkAddress, ReferralNetworkABI, provider);
+    return new ethers.Contract(V3ReferralRegistryAddress, ReferralNetworkABI, provider);
   }, [provider]);
 
   const fetchNodeSummary = async (address, depth = 0) => {

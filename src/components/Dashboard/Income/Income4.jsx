@@ -4,7 +4,7 @@ import { TableCell } from "@mui/material";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import { PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
+import { IncomeReadyLensAddress, PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import {
   createBscReadProvider,
@@ -95,11 +95,7 @@ export const Income4 = () => {
         V2PackageManagerABI,
         provider,
       );
-      const incomeLens = new ethers.Contract(
-        await manager.incomeReadyLens(),
-        V2PackageManagerABI,
-        provider,
-      );
+      const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, provider);
 
       const [powerDetails, roiDay, latestBlock] = await Promise.all([
         incomeLens.getPowerDetails(user),
