@@ -170,14 +170,10 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
       const v1 = v1Result.status === "fulfilled" ? v1Result.value : { ready: 0n, claimed: 0n, records: [] };
       const v2 = v2Result.status === "fulfilled" ? v2Result.value : { ready: 0n, claimed: 0n, records: [] };
       const v3 = v3Result.status === "fulfilled" ? v3Result.value : { ready: 0n, claimed: 0n, records: [] };
-      const sourceOrder = { v1: 0, v2: 1, v3: 2 };
       const combinedRows = groupSameTimeLevelRoi([...v1.records, ...v2.records, ...v3.records])
-        // Keep the historic eras readable: all V1 rows, then V2, then V3.
-        // Each era itself is displayed in its real chronological order.
-        .sort((a, b) => {
-          const sourceDifference = (sourceOrder[a.recordSource] ?? 99) - (sourceOrder[b.recordSource] ?? 99);
-          return sourceDifference || Number(a.timestamp) - Number(b.timestamp);
-        })
+        // One unified history: newest claim at the top, regardless of its
+        // V1/V2/V3 origin; the UI deliberately does not expose that source.
+        .sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
         .map((record, index) => ({
           ...record,
           sno: index + 1,
