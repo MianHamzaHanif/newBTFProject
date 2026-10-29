@@ -12,7 +12,9 @@ const V1_PACKAGE_HISTORY_ABI = [
   "function getStakeHistoryLength(address user) view returns(uint256)",
   "function userStakeHistory(address user,uint256 index) view returns(uint256 packageValue,uint256 usdtAmount,uint256 tokenAmount,uint256 burnAmount,uint256 ownerLockAmount,uint256 userLockAmount,uint256 roiClaimed,uint256 timestamp)",
   "function getStakeIncomeStatus(address user,uint256 index) view returns(uint256 incomeLimit,uint256 usedIncome,uint256 remainingIncome,bool completed)",
-  "function getStakeRoiInfo(address user,uint256 index) view returns(uint256 principal,uint256 maxRoi,uint256 totalAccrued,uint256 claimed,uint256 claimable,uint256 lastClaimAt)",
+  // V1 PackageManager returns exactly five fields. Declaring a sixth output
+  // makes ethers reject every V1 row with a result-decoding error.
+  "function getStakeRoiInfo(address user,uint256 index) view returns(uint256 principal,uint256 maxRoi,uint256 totalAccrued,uint256 claimed,uint256 claimable)",
 ];
 
 const PACKAGE_MIGRATION_SOURCE_ABI = [
