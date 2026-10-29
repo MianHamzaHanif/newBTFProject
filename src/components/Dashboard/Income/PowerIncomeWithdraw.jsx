@@ -124,9 +124,8 @@ export const PowerIncomeWithdraw = () => {
         directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
       }
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [packageHistory, qualified, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
+        const [packageHistory, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
           loadPrioritizedPackageHistory(member.address).catch(() => ({ records: [] })),
-          member.inV2 ? registry.hasQualifiedPackage(member.address).catch(() => false) : false,
           member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
           member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
           member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
@@ -147,11 +146,12 @@ export const PowerIncomeWithdraw = () => {
           ? (legBusiness > rewardCapPerLeg ? rewardCapPerLeg : legBusiness)
           : 0n;
         return {
-          sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness),
-          teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted),
+          sno: index + 1,
+          direct: shortAddress(member.address),
+          selfBusiness: formatUsdt(selfBusiness),
+          teamBusiness: formatUsdt(teamBusiness),
           countedRaw: counted,
           rewardCountedRaw: rewardCounted,
-          status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package",
         };
       }));
       const qualifiedBusiness = directRows.reduce((total, row) => total + row.countedRaw, 0n);
@@ -233,11 +233,8 @@ export const PowerIncomeWithdraw = () => {
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
-    { id: "selfBusiness", label: "Direct Business", sortable: true },
-    { id: "teamBusiness", label: "Team Business", sortable: true },
-    { id: "business", label: "Leg Business (Active + Inactive)", sortable: true },
-    { id: "counted", label: "Counted for Next Power", sortable: true },
-    { id: "status", label: "Status", sortable: true },
+    { id: "selfBusiness", label: "Direct Self Business (Active + Inactive)", sortable: true },
+    { id: "teamBusiness", label: "Direct Team Business (Active + Inactive)", sortable: true },
   ];
 
   return (
@@ -278,9 +275,6 @@ export const PowerIncomeWithdraw = () => {
           <TableCell align="center">{row.direct}</TableCell>
           <TableCell align="center">{row.selfBusiness} USDT</TableCell>
           <TableCell align="center">{row.teamBusiness} USDT</TableCell>
-          <TableCell align="center">{row.business} USDT</TableCell>
-          <TableCell align="center">{row.counted} USDT</TableCell>
-          <TableCell align="center">{row.status}</TableCell>
         </>
       )} />
     </div>
