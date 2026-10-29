@@ -7,6 +7,7 @@ import { ReferralNetworkAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { loadPrioritizedPackageHistory } from "../../../blockchain/prioritizedPackageHistory";
 import "../styles/style.css";
 
 const V1_POWER_MANAGER_ABI = [
@@ -123,19 +124,21 @@ export const PowerIncomeWithdraw = () => {
         directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
       }
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v2User, qualified, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
-          member.inV2 ? registry.users(member.address).catch(() => null) : null,
+        const [packageHistory, qualified, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
+          loadPrioritizedPackageHistory(member.address).catch(() => ({ records: [] })),
           member.inV2 ? registry.hasQualifiedPackage(member.address).catch(() => false) : false,
           member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
           member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
           member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
         ]);
-        // These two fields are the current active balances. The authoritative
-        // Power/Reward figure below is `legBusiness`, which deliberately
-        // retains inactive package history as well.
-        const selfBusiness = BigInt(v2User?.selfDeposit ?? v2User?.[5] ?? 0n);
-        const teamBusiness = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
+        // `legBusiness` is V3's lifetime Power/Reward value. Derive the
+        // lifetime team portion from it, so inactive packages are included in
+        // Direct Business, Team Business and their Leg Business total.
+        const selfBusiness = packageHistory.records.reduce(
+          (total, record) => total + BigInt(record.amount ?? 0n), 0n,
+        );
         const legBusiness = BigInt(v3LegBusiness);
+        const teamBusiness = legBusiness > selfBusiness ? legBusiness - selfBusiness : 0n;
         const eligible = legacyCounted || everPackage;
         const counted = nextLevel && member.inV2 && eligible
           ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
@@ -230,8 +233,8 @@ export const PowerIncomeWithdraw = () => {
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
-    { id: "selfBusiness", label: "Active Direct Business", sortable: true },
-    { id: "teamBusiness", label: "Active Team Business", sortable: true },
+    { id: "selfBusiness", label: "Direct Business", sortable: true },
+    { id: "teamBusiness", label: "Team Business", sortable: true },
     { id: "business", label: "Leg Business (Active + Inactive)", sortable: true },
     { id: "counted", label: "Counted for Next Power", sortable: true },
     { id: "status", label: "Status", sortable: true },
