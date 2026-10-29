@@ -38,6 +38,20 @@ const createV1ReadProvider = () => {
   return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
 };
 
+const combinedPackageBusiness = async (address) => {
+  const { records } = await loadPrioritizedPackageHistory(address);
+  return records.reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
+};
+
+const v3NewTeamBusiness = async (address, v3User, registry) => {
+  const total = BigInt(v3User?.totalTeamDeposit ?? v3User?.[4] ?? 0n);
+  if (!v3User || total === 0n) return 0n;
+  const importedV1LevelBusiness = (await Promise.all(
+    Array.from({ length: 15 }, (_, level) => registry.legacyLevelRemaining(address, level).catch(() => 0n)),
+  )).reduce((sum, amount) => sum + BigInt(amount), 0n);
+  return total > importedV1LevelBusiness ? total - importedV1LevelBusiness : 0n;
+};
+
 async function ensureBscMainnet() {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
   if (BigInt(chainId) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
@@ -124,20 +138,17 @@ export const PowerIncomeWithdraw = () => {
         directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
       }
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [packageHistory, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
-          loadPrioritizedPackageHistory(member.address).catch(() => ({ records: [] })),
+        const [v1User, v3User, selfBusiness, legacyCounted, everPackage, v3LegBusiness] = await Promise.all([
+          member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
+          member.inV2 ? registry.users(member.address).catch(() => null) : null,
+          combinedPackageBusiness(member.address).catch(() => 0n),
           member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
           member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
           member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
         ]);
-        // `legBusiness` is V3's lifetime Power/Reward value. Derive the
-        // lifetime team portion from it, so inactive packages are included in
-        // Direct Business, Team Business and their Leg Business total.
-        const selfBusiness = packageHistory.records.reduce(
-          (total, record) => total + BigInt(record.amount ?? 0n), 0n,
-        );
+        const v3TeamNew = await v3NewTeamBusiness(member.address, v3User, registry);
+        const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v3TeamNew;
         const legBusiness = BigInt(v3LegBusiness);
-        const teamBusiness = legBusiness > selfBusiness ? legBusiness - selfBusiness : 0n;
         const eligible = legacyCounted || everPackage;
         const counted = nextLevel && member.inV2 && eligible
           ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
@@ -233,8 +244,8 @@ export const PowerIncomeWithdraw = () => {
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
-    { id: "selfBusiness", label: "Direct Self Business (Active + Inactive)", sortable: true },
-    { id: "teamBusiness", label: "Direct Team Business (Active + Inactive)", sortable: true },
+    { id: "selfBusiness", label: "Direct Self Business", sortable: true },
+    { id: "teamBusiness", label: "Direct Team Business", sortable: true },
   ];
 
   return (
