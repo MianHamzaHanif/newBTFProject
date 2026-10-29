@@ -181,7 +181,10 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
           timestampDisplay: formatTime(record.timestamp),
         }));
       setRows(combinedRows);
-      setTotals({ ready: v1.ready + v2.ready + v3.ready, claimed: v1.claimed + v2.claimed + v3.claimed });
+      // Claims now execute on V3. Historical V1/V2 values belong in the
+      // claimed total only; the ready card must never advertise an amount
+      // that the current V3 claim transaction cannot spend.
+      setTotals({ ready: v3.ready, claimed: v1.claimed + v2.claimed + v3.claimed });
       const failures = [];
       if (v1Result.status === "rejected") failures.push("V1 income history could not be loaded");
       if (v2Result.status === "rejected") failures.push("V2 income history could not be loaded");
