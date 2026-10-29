@@ -30,13 +30,36 @@ const createV1ReadProvider = () => {
   });
 };
 
+const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+// Public BSC RPC nodes occasionally drop one request in a batch on mobile
+// networks. A single dropped request must not make the whole V1/V2/V3 history
+// disappear from the activation table.
+const readWithRetry = async (reader, index, attempts = 3) => {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await reader(index);
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts) await pause(350 * (attempt + 1));
+    }
+  }
+  throw lastError;
+};
+
 const readInBatches = async (count, reader, batchSize = 10) => {
-  const output = [];
+  const records = [];
+  const failedIndexes = [];
   for (let start = 0; start < count; start += batchSize) {
     const indexes = Array.from({ length: Math.min(batchSize, count - start) }, (_, offset) => start + offset);
-    output.push(...await Promise.all(indexes.map(reader)));
+    const settled = await Promise.allSettled(indexes.map((index) => readWithRetry(reader, index)));
+    settled.forEach((result, offset) => {
+      if (result.status === "fulfilled") records.push(result.value);
+      else failedIndexes.push(indexes[offset]);
+    });
   }
-  return output;
+  return { records, failedIndexes };
 };
 
 const keyOf = (record) => `${BigInt(record.amount ?? 0n)}:${BigInt(record.timestamp ?? 0n)}`;
@@ -80,7 +103,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
 
   const readV1 = async () => {
     const length = Number(await v1Manager.getStakeHistoryLength(walletAddress));
-    return readInBatches(length, async (index) => {
+    const result = await readInBatches(length, async (index) => {
       const [stake, income, roi, migratedToV3] = await Promise.all([
         v1Manager.userStakeHistory(walletAddress, index),
         v1Manager.getStakeIncomeStatus(walletAddress, index),
@@ -102,6 +125,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
         active, migratedToV3: Boolean(migratedToV3),
       };
     });
+    return result;
   };
 
   const readVersion = async (manager, version) => {
@@ -112,7 +136,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
       manager.ROI_DAY(walletAddress).catch(() => 0n),
     ]);
     const length = Number(lengthRaw);
-    const records = await readInBatches(length, async (index) => {
+    const history = await readInBatches(length, async (index) => {
       const [record, migratedToV3] = await Promise.all([
         manager.getPackageHistoryAt(walletAddress, index),
         version === "V2" ? source.v2IndexRegistered(walletAddress, index).catch(() => false) : false,
@@ -134,7 +158,8 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
       };
     });
     return {
-      records,
+      records: history.records,
+      failedIndexes: history.failedIndexes,
       aggregateUsed: BigInt(aggregateUsed),
       pendingSelfRoi: BigInt(pendingSelfRoi),
       roiDay: BigInt(roiDay),
@@ -145,8 +170,9 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     readV1(), readVersion(v2Manager, "V2"), readVersion(v3Manager, "V3"),
   ]);
   const failures = [];
-  const v1 = v1Result.status === "fulfilled" ? v1Result.value : [];
-  const emptyVersion = { records: [], aggregateUsed: 0n, pendingSelfRoi: 0n, roiDay: 0n };
+  const v1Data = v1Result.status === "fulfilled" ? v1Result.value : { records: [], failedIndexes: [] };
+  const v1 = v1Data.records;
+  const emptyVersion = { records: [], failedIndexes: [], aggregateUsed: 0n, pendingSelfRoi: 0n, roiDay: 0n };
   const v2Data = v2Result.status === "fulfilled" ? v2Result.value : emptyVersion;
   const v3Data = v3Result.status === "fulfilled" ? v3Result.value : emptyVersion;
   const v2 = v2Data.records;
@@ -154,6 +180,9 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   if (v1Result.status === "rejected") failures.push("V1 history could not be loaded");
   if (v2Result.status === "rejected") failures.push("V2 history could not be loaded");
   if (v3Result.status === "rejected") failures.push("V3 history could not be loaded");
+  if (v1Data.failedIndexes.length) failures.push(`V1 package indexes ${v1Data.failedIndexes.join(", ")} could not be loaded`);
+  if (v2Data.failedIndexes.length) failures.push(`V2 package indexes ${v2Data.failedIndexes.join(", ")} could not be loaded`);
+  if (v3Data.failedIndexes.length) failures.push(`V3 package indexes ${v3Data.failedIndexes.join(", ")} could not be loaded`);
 
   // A source-registration flag alone is not proof that the destination row
   // is currently readable. A prior interrupted/manual migration can leave a
