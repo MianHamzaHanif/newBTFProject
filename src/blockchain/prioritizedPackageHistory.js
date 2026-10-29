@@ -155,10 +155,18 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   if (v2Result.status === "rejected") failures.push("V2 history could not be loaded");
   if (v3Result.status === "rejected") failures.push("V3 history could not be loaded");
 
-  const visibleV2 = v2.filter((record) => !record.migratedToV3);
-  const visibleV1Candidates = v1.filter((record) => !record.migratedToV3);
-  // Pre-V3 V1 imports have original amount/timestamp retained in V2.
-  const visibleV1 = removeCovered(visibleV1Candidates, countRecords(v2));
+  // A source-registration flag alone is not proof that the destination row
+  // is currently readable. A prior interrupted/manual migration can leave a
+  // flag set while V3 history has no corresponding package row. Therefore a
+  // lower-priority record is hidden only by an *actual* higher-priority row.
+  // Legacy imports retain amount + original purchasedAt, making this a stable
+  // key: V3 -> V2 -> V1, for both active and inactive packages.
+  const v3Coverage = countRecords(v3);
+  const visibleV2 = removeCovered(v2, v3Coverage);
+  // All V2 rows (including a V2 row already represented by V3) cover their
+  // matching V1 legacy copy. Any V3 row left after V2 matching is V1-only.
+  const v1AfterV2 = removeCovered(v1, countRecords(v2));
+  const visibleV1 = removeCovered(v1AfterV2, v3Coverage);
   const records = [...visibleV1, ...visibleV2, ...v3]
     .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
   return {
