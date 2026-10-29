@@ -4,7 +4,8 @@ import { TableCell } from "@mui/material";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import { IncomeReadyLensAddress, PackageManagerAddress, ReferralNetworkAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
+import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
+import { IncomeReadyLensAddress, PackageManagerAddress, ReferralNetworkAddress, V2LedgerAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import {
   createBscReadProvider,
@@ -43,9 +44,6 @@ const V1_POWER_MODULE_ABI = [
   "function powerLevelStartedAt(address) view returns(uint256)",
   "function powerClaimedCount(address) view returns(uint256)",
   "function rawClaimable(address) view returns(uint256)",
-];
-const V1_POWER_REGISTRY_ABI = [
-  "function users(address user) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
 ];
 const POWER_LEG_CAP_BPS = 4000n;
 const BASIS_POINTS = 10000n;
@@ -107,12 +105,39 @@ export const Income4 = () => {
         V2ReferralRegistryABI,
         provider,
       );
+      const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, provider);
       const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, provider);
-      const powerLevel = Number(powerDetails.activeLevel || powerDetails.achievedLevel || 0n);
+      const [registryAchievedPowerRaw, powerHistoryLengthRaw] = await Promise.all([
+        registry.getAchievedPowerLevel(user),
+        ledger.getUserIncomeHistoryLengthByType(user, 3),
+      ]);
+      const powerHistory = await Promise.all(
+        Array.from({ length: Number(powerHistoryLengthRaw) }, (_, index) =>
+          ledger.getUserIncomeHistoryAtByType(user, 3, index),
+        ),
+      );
+      // The ledger stores Power claims with their P-level. Keep the most
+      // recent timestamp per level instead of incorrectly showing the one
+      // global Manager timestamp in every P1/P2/P3 row.
+      const lastPowerClaimAtByLevel = new Map();
+      for (const record of powerHistory) {
+        const level = Number(record.level ?? record[0] ?? 0n);
+        const timestamp = BigInt(record.timestamp ?? record[2] ?? 0n);
+        if (level && timestamp > BigInt(lastPowerClaimAtByLevel.get(level) ?? 0n)) {
+          lastPowerClaimAtByLevel.set(level, timestamp);
+        }
+      }
+      const powerLevel = Math.max(
+        Number(powerDetails.activeLevel || powerDetails.achievedLevel || 0n),
+        Number(registryAchievedPowerRaw ?? 0n),
+      );
       const achievedAt = powerLevel
         ? await registry.powerAchievedAt(user, powerLevel)
         : 0n;
-      const achievedPowerLevel = Number(powerDetails.achievedLevel ?? 0n);
+      const achievedPowerLevel = Math.max(
+        Number(powerDetails.achievedLevel ?? 0n),
+        Number(registryAchievedPowerRaw ?? 0n),
+      );
       const levels = await Promise.all(
         Array.from({ length: achievedPowerLevel }, async (_, offset) => {
           const level = offset + 1;
@@ -130,6 +155,7 @@ export const Income4 = () => {
             releasedCount,
             claimedAmount,
             claimedCount,
+            lastClaimAt: lastPowerClaimAtByLevel.get(level) ?? 0n,
             pendingAmount: BigInt(pendingAmount) + BigInt(carriedAmount),
           };
         }),
@@ -147,7 +173,6 @@ export const Income4 = () => {
       // record owns the baseline row while only higher ranks come from V2.
       const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, provider);
       const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, provider);
-      const v1PowerRegistry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_POWER_REGISTRY_ABI, provider);
       const [v1Level, v1ActivatedAt, v1ClaimedCount, v1Claimable, v1TotalClaimed, v1LastClaimAt, v1NextPayoutAt, v1Day] = await Promise.all([
         v1PowerModule.activePowerLevel(user),
         v1PowerModule.powerLevelStartedAt(user),
@@ -170,14 +195,10 @@ export const Income4 = () => {
       let nextThreshold = 0n;
       let nextQualified = 0n;
       if (nextPowerLevel) {
-        // Preview the exact V2 next-rank formula in the UI. Each V2 direct
-        // leg contributes its V2 business plus its eligible V1 baseline,
-        // then that leg is capped at 40% of the V2 threshold. No contract
-        // state is changed here; this is a read-only preview until V2's
-        // legacy-leg migration has completed on-chain.
-        const [threshold, legacyLegsImported, directCount] = await Promise.all([
+        // Legacy leg business has already been imported into V3. Preview the
+        // V3 Registry state only; adding V1/V2 again would double-count it.
+        const [threshold, directCount] = await Promise.all([
           registry.powerThreshold(nextPowerLevel),
-          registry.legacyLegsReady(user),
           registry.getLevelUsersLength(user, 0),
         ]);
         nextThreshold = BigInt(threshold);
@@ -188,27 +209,15 @@ export const Income4 = () => {
         );
         const perLegCap = (nextThreshold * POWER_LEG_CAP_BPS) / BASIS_POINTS;
         const legQualified = await readInBatches(directs, async (direct) => {
-          const [v2Business, importedLegacyBusiness, isMigrated, hasEverPackage, legacyCounted, v1User] = await Promise.all([
+          const [business, hasEverPackage, legacyCounted] = await Promise.all([
             registry.legBusiness(user, direct),
-            registry.legacyLegBusiness(user, direct),
-            registry.migrated(direct),
             registry.hasEverPackage(direct),
             registry.legacyDirectCounted(direct),
-            v1PowerRegistry.users(direct).catch(() => null),
           ]);
           const eligible = Boolean(hasEverPackage) || Boolean(legacyCounted);
           if (!eligible) return 0n;
-
-          // legBusiness already includes an individually imported V1 leg.
-          // For a leg not yet imported, add its V1 snapshot locally only for
-          // this read-only preview. This also handles a partially completed
-          // legacy-leg migration without double counting.
-          const v1Business = isMigrated && v1User
-            ? BigInt(v1User.totalTeamDeposit ?? 0n) + BigInt(v1User.selfDeposit ?? 0n)
-            : 0n;
-          const combinedBusiness = BigInt(v2Business)
-            + (legacyLegsImported || BigInt(importedLegacyBusiness) > 0n ? 0n : v1Business);
-          return combinedBusiness > perLegCap ? perLegCap : combinedBusiness;
+          const v3Business = BigInt(business);
+          return v3Business > perLegCap ? perLegCap : v3Business;
         });
         nextQualified = legQualified.reduce((total, amount) => total + amount, 0n);
       }
@@ -340,7 +349,6 @@ export const Income4 = () => {
     { id: "lastClaimAt", label: "Last Claim Time", sortable: true },
   ];
   const v2HistoryRows = visibleLevelDetails.map((item) => {
-    const lastClaim = details?.lastClaimAt ?? 0n;
     let releasedCount = Number(item.releasedCount);
     if (item.level === activeLevel && item.activatedAt && powerTiming.now >= item.activatedAt) {
       const virtualReleased = ((powerTiming.now - item.activatedAt) / (10n * powerTiming.roiDay)) + 1n;
@@ -352,7 +360,7 @@ export const Income4 = () => {
       releasedCount: `${releasedCount} / 20`,
       claimedCount: Number(item.claimedCount),
       claimedAmount: formatUsdt(item.claimedAmount),
-      lastClaimAt: formatTime(lastClaim),
+      lastClaimAt: formatTime(item.lastClaimAt),
     };
   });
   const historyRows = [
@@ -398,13 +406,12 @@ export const Income4 = () => {
           formatUsdt(powerClaimable),
           `Released: ${displayedReleasedCount} | Claimed: ${displayedClaimedCount}`,
         )}
-        {!finalizedInV1 && legacyPower ? card("V1 Pending Power (Migrated)", formatUsdt(legacyPower.claimableAmount), `P${legacyPower.level} | Paid: ${legacyPower.paidInstallments}`) : null}
         {card("Power Last Claim At", formatTime(displayedLastClaimAt))}
         {card("Next Achieve Power", nextLevel ? `P${nextLevel}` : "Max achieved")}
         {card(
           "Next Achieve Power Business",
           required,
-          `Qualified business: ${qualified} (V1 + V2, max 40% per leg)`,
+          `Qualified business: ${qualified}`,
         )}
         {card(
           "Next Power Payout At",
