@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from "react";
 import CustomTable from "../CommonComponents/CustomTable";
 import { ethers } from "ethers";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
-import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2RegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import {
@@ -14,6 +13,7 @@ import {
 import { getReadWalletAddress } from "../../../blockchain/readProvider";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
+import { loadPrioritizedPackageHistory } from "../../../blockchain/prioritizedPackageHistory";
 
 // Keep V1 reads to the exact functions needed here. The V1 and V2 registries
 // must be queried independently during migration.
@@ -145,45 +145,14 @@ export const MyTeam = () => {
     return walletAddress;
   };
 
-  const getCombinedPackageTotal = async (address, v1Manager, v2Manager) => {
-    const [v1Result, v2Result] = await Promise.allSettled([
-      v1Manager.getStakeHistoryLength(address),
-      v2Manager.getPackageHistoryLength(address),
-    ]);
-    const v1Length = v1Result.status === "fulfilled" ? Number(v1Result.value ?? 0n) : 0;
-    const v2Length = v2Result.status === "fulfilled" ? Number(v2Result.value ?? 0n) : 0;
-    const [v1StakesResult, v2PackagesResult] = await Promise.allSettled([
-      readInBatches(Array.from({ length: v1Length }, (_, index) => index), (index) => v1Manager.userStakeHistory(address, index)),
-      readInBatches(Array.from({ length: v2Length }, (_, index) => index), (index) => readPackageHistory(v2Manager, address, index)),
-    ]);
-    // A missing V2 package record must not hide the user's complete V1 team
-    // row (and vice versa). Retain whichever history source answered.
-    const v1Stakes = v1StakesResult.status === "fulfilled" ? v1StakesResult.value : [];
-    const v2Packages = v2PackagesResult.status === "fulfilled" ? v2PackagesResult.value : [];
-
-    // Every imported V1 package keeps its original timestamp in V2. Count
-    // those keys once so only a new V2 package is added to the V1 amount.
-    const legacySourceKeys = new Map();
-    let v1Total = 0n;
-    for (const stake of v1Stakes) {
-      const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n);
-      const purchasedAt = BigInt(stake?.timestamp ?? stake?.[7] ?? 0n);
-      v1Total += amount;
-      const key = `${amount}:${purchasedAt}`;
-      legacySourceKeys.set(key, (legacySourceKeys.get(key) ?? 0) + 1);
-    }
-    const v2NewTotal = v2Packages.reduce((total, record) => {
-      const amount = BigInt(record?.amount ?? record?.[0] ?? 0n);
-      const purchasedAt = BigInt(record?.purchasedAt ?? record?.[1] ?? 0n);
-      const key = `${amount}:${purchasedAt}`;
-      const legacyCount = legacySourceKeys.get(key) ?? 0;
-      if (legacyCount > 0) {
-        legacySourceKeys.set(key, legacyCount - 1);
-        return total;
-      }
-      return total + amount;
-    }, 0n);
-    return v1Total + v2NewTotal;
+  const getCombinedPackageTotal = async (address) => {
+    // Package migrations do not always create a public V3 history row. The
+    // shared reader therefore falls back V3 -> legacy V2 -> V1 and suppresses
+    // a package only when the same amount/original purchase time exists in a
+    // higher-priority source. Active and inactive packages both remain part
+    // of this lifetime "Total Package" value.
+    const { records } = await loadPrioritizedPackageHistory(address);
+    return records.reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
   };
 
   const fetchTeamDetails = async (downlineAddress) => {
@@ -294,7 +263,6 @@ export const MyTeam = () => {
           V1_TEAM_READER_ABI,
           v1Provider,
         );
-        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
         const levelIndex = selectedLevel - 1;
         const readLevelAddresses = async (registry) => {
           let lastError;
@@ -332,7 +300,7 @@ export const MyTeam = () => {
           const [v1User, v2User, packageTotal] = await Promise.all([
             member.inV1 ? v1ReferralContract.users(member.address).catch(() => null) : null,
             member.inV2 ? v2ReferralContract.users(member.address).catch(() => null) : null,
-            getCombinedPackageTotal(member.address, v1Manager, v2Manager).catch(() => 0n),
+            getCombinedPackageTotal(member.address).catch(() => 0n),
           ]);
           const userData = v2User ?? v1User;
           const v1Team = BigInt(v1User?.totalTeam ?? v1User?.[3] ?? 0n);
