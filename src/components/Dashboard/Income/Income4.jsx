@@ -49,6 +49,10 @@ const V1_POWER_MODULE_ABI = [
 ];
 const POWER_LEG_CAP_BPS = 4000n;
 const BASIS_POINTS = 10000n;
+// This account's P1 snapshot was imported without the already-paid V1
+// installment baseline. Until that on-chain snapshot is repaired, display
+// its P1 from V1 so the UI cannot present those paid cycles again.
+const V1_POWER_BASELINE_OVERRIDE_USER = "0x340175da3dac792f372f8e7eb7edf47cadb96c4c";
 
 const readInBatches = async (items, read, batchSize = 5) => {
   const results = [];
@@ -296,6 +300,7 @@ export const Income4 = () => {
         lastClaimAt: v1LastClaimAt,
         nextPayoutAt: v1NextPayoutAt,
         day: v1Day,
+        forceV1Baseline: user.toLowerCase() === V1_POWER_BASELINE_OVERRIDE_USER,
       } : null);
       setLegacyPowerLevels(fallbackByLevel);
       setNextPowerProgress({
@@ -337,13 +342,11 @@ export const Income4 = () => {
     v1Power &&
     Number(v1Power.level) === v1BaselineLevel
   );
-  // A number of early V1->V3 rank imports copied the achieved P-level and
-  // activation time but not its already-paid installment baseline. Detect
-  // that exact state generically: V1 has paid cycles for the same active
-  // level while V3 has no counters or pending balance at all. V1 is then the
-  // truthful historical source until the on-chain snapshot is repaired.
+  // This specific early V1->V3 P1 import copied the achieved rank/time but
+  // not its already-paid baseline. Its override is deliberately scoped to
+  // that known account; all other accounts retain V3 -> V2 -> V1 priority.
   const v1LevelMatchesEmptyV3 = Boolean(
-    v1Power
+    v1Power?.forceV1Baseline
     && Number(v1Power.level) === nativeActiveLevel
     && BigInt(v1Power.claimedCount ?? 0n) > 0n
     && (() => {
