@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
 import { useLocation } from "react-router-dom";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
+import LegacyV2IncomeLedgerABI from "../../../blockchain/legacyV2IncomeLedgerABI";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
-import { PackageManagerAddress, ReferralNetworkAddress, SettlementTokenSymbol, V2DaoAddress, V2LedgerAddress, V3ActionsEnabled } from "../../../blockchain/address";
+import { LegacyV2LedgerAddress, PackageManagerAddress, ReferralNetworkAddress, SettlementTokenSymbol, V2DaoAddress, V2LedgerAddress, V3ActionsEnabled } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
@@ -287,19 +288,29 @@ export default function V2Withdrawal() {
       if (!user || !ethers.isAddress(user)) throw new Error("Please connect your wallet.");
       if (!ethers.isAddress(V2LedgerAddress)) throw new Error("V3 ledger address is not configured.");
 
-      const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, createBscReadProvider());
-      const [balance, minimum] = await Promise.all([
+      const provider = createBscReadProvider();
+      const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, provider);
+      const legacyLedger = new ethers.Contract(LegacyV2LedgerAddress, LegacyV2IncomeLedgerABI, provider);
+      const [balance, minimum, v3Withdrawn, legacyV2Withdrawn] = await Promise.all([
         ledger.balanceOf(user),
         ledger.minWithdrawAmount(),
-      ]);
-      const withdrawn = await ledger.getUserWithdrawHistoryLength(user)
+        ledger.getUserWithdrawHistoryLength(user)
         .then(async (length) => {
           const entries = await Promise.all(
             Array.from({ length: Number(length) }, (_, index) => ledger.getUserWithdrawHistoryAt(user, index)),
           );
           return entries.reduce((sum, item) => sum + (item.netAmount ?? item[2] ?? 0n), 0n);
         })
-        .catch(() => 0n);
+        .catch(() => 0n),
+        legacyLedger.getUserWithdrawHistoryLength(user)
+          .then(async (length) => {
+            const entries = await Promise.all(
+              Array.from({ length: Number(length) }, (_, index) => legacyLedger.getUserWithdrawHistoryAt(user, index)),
+            );
+            return entries.reduce((sum, item) => sum + BigInt(item.amount ?? item[0] ?? 0n), 0n);
+          })
+          .catch(() => 0n),
+      ]);
 
       setPending(balance);
       setMinimumWithdraw(
@@ -307,7 +318,10 @@ export default function V2Withdrawal() {
           ? BigInt(minimum)
           : V2_UI_MIN_WITHDRAWAL,
       );
-      setTotalWithdrawn(withdrawn);
+      // V2's legacy ledger stores `(amount,timestamp)`, while V3 stores
+      // `(gross,fee,net,timestamp)`. The user-facing history and this card
+      // both represent the received/net amount, so the sum is consistent.
+      setTotalWithdrawn(BigInt(legacyV2Withdrawn) + BigInt(v3Withdrawn));
     } catch (error) {
       setPending(0n);
       setMinimumWithdraw(V2_UI_MIN_WITHDRAWAL);
@@ -503,7 +517,7 @@ export default function V2Withdrawal() {
 
       {showV2 && <div id="withdraw-v2" className="table-card" style={{ marginTop: "24px" }}>
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2 className="mb-0">V2 Withdrawal Total</h2>
+        <h2 className="mb-0">Withdraw Total</h2>
         <button className="btn btn-outline-primary" onClick={refreshAll} disabled={loading || v1Loading || withdrawing}>
           {loading ? "Loading..." : "Refresh"}
         </button>
@@ -511,15 +525,15 @@ export default function V2Withdrawal() {
       {WITHDRAWALS_PAUSED ? <p className="team-loading withdraw-status">{MIGRATION_PAUSED_MESSAGE}</p> : null}
       <div className="withdrawal-grid">
         <div className="withdrawal-card">
-          <p className="withdrawal-card-title">V2 Pending Withdrawal</p>
+          <p className="withdrawal-card-title">Pending Withdraw</p>
           <h4 className="withdrawal-card-value">{formatUsdt(pending)} USDT</h4>
         </div>
         <div className="withdrawal-card">
-          <p className="withdrawal-card-title">Total V2 Withdrawn</p>
+          <p className="withdrawal-card-title">Total Withdraw</p>
           <h4 className="withdrawal-card-value">{formatUsdt(totalWithdrawn)} USDT</h4>
         </div>
         <div className="withdrawal-card">
-          <p className="withdrawal-card-title">Minimum V3 Withdrawal</p>
+          <p className="withdrawal-card-title">Minimum Withdraw</p>
           <h4 className="withdrawal-card-value">{formatUsdt(minimumWithdraw)} {SettlementTokenSymbol}</h4>
         </div>
       </div>
