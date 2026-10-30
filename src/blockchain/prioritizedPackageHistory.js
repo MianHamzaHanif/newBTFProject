@@ -250,26 +250,38 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
       ? storageLengthRaw
       : publicLengthRaw);
     const history = await readInBatches(length, async (index) => {
-      const [record, migratedToV3] = await Promise.all([
-        (version === "V2"
-          ? manager.getPackageHistoryAt(walletAddress, index).catch(() =>
-            readLegacyV2PackageStorage(provider, walletAddress, index),
-          )
-          : readV3PackageStorage(provider, walletAddress, index)),
+      const [[record, legacyMeta], migratedToV3] = await Promise.all([
+        Promise.all([
+          (version === "V2"
+            ? manager.getPackageHistoryAt(walletAddress, index).catch(() =>
+              readLegacyV2PackageStorage(provider, walletAddress, index),
+            )
+            : readV3PackageStorage(provider, walletAddress, index)),
+          // Even when V2's public history getter succeeds, it does not
+          // expose the `isLegacyPackage` flag. Read the authoritative mapping
+          // for every V2 index so a V1 migration mirror is never treated as
+          // an independent native V2 purchase.
+          version === "V2"
+            ? readLegacyV2PackageMeta(provider, walletAddress, index)
+            : Promise.resolve(null),
+        ]),
         version === "V2" ? source.v2IndexRegistered(walletAddress, index).catch(() => false) : false,
       ]);
       const amount = BigInt(record.amount ?? record[0] ?? 0n);
       const active = Boolean(record.active ?? record[5]);
+      const originalTimestamp = legacyMeta?.isLegacy && legacyMeta.originalPurchasedAt !== 0n
+        ? legacyMeta.originalPurchasedAt
+        : BigInt(record.purchasedAt ?? record[1] ?? 0n);
       return {
         source: version, sourceIndex: index, amount,
-        timestamp: BigInt(record.purchasedAt ?? record[1] ?? 0n),
+        timestamp: originalTimestamp,
         generated: BigInt(record.roiGenerated ?? record[3] ?? 0n),
         maximum: BigInt(record.roiMaximum ?? record[4] ?? 0n),
         incomeLimit: incomeLimitForPackage(amount),
         usedIncome: null,
         aggregateUsed: BigInt(aggregateUsed ?? 0n),
         active,
-        legacyV1Mirror: Boolean(record.legacyV1Mirror),
+        legacyV1Mirror: Boolean(record.legacyV1Mirror || legacyMeta?.isLegacy),
         migratedToV3: Boolean(migratedToV3),
       };
     });
