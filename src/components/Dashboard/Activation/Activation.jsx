@@ -81,7 +81,10 @@ export const Activation = () => {
           activePackagesAmount: sum(active, (record) => record.amount),
           pendingRoi: BigInt(sourceTotals.v1Claimable) + BigInt(sourceTotals.v2PendingSelfRoi) + BigInt(sourceTotals.v3PendingSelfRoi),
           roiMaximum: sum(records, (record) => record.maximum),
-          roiProgress: `${percent(sum(records, (record) => record.generated), sum(active, (record) => record.maximum))}% / 100.00%`,
+          // Progress is against the complete 3x target.  Inactive legacy
+          // packages still contributed to the user's historical ROI target,
+          // so using only active-package maximums inflates the percentage.
+          roiProgress: `${percent(sum(records, (record) => record.generated), sum(records, (record) => record.maximum))}% / 100.00%`,
           allPackagesIncomeLimit: sum(records, (record) => record.incomeLimit),
           activePackagesIncomeLimit: activeIncomeLimit,
           activePackagesIncomeUsed: activeIncomeUsed,

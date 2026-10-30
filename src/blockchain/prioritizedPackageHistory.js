@@ -403,7 +403,10 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
       migratedV2Index: matched.sourceIndex,
       legacyV1Mirror: Boolean(matched.legacyV1Mirror),
       maximum: record.maximum === 0n ? matched.maximum : record.maximum,
-      generated: record.maximum === 0n ? matched.generated : record.generated,
+      // V3's compact history storage keeps the ROI maximum but not the
+      // legacy generated amount. Restore it independently of `maximum`;
+      // otherwise ROI progress shows an artificially low percentage.
+      generated: record.generated === 0n ? matched.generated : record.generated,
     };
   });
   const v3Coverage = countRecords(v3WithSource);
