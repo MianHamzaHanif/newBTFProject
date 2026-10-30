@@ -161,7 +161,12 @@ export const Income6 = () => {
           const releasedCount = BigInt(released);
           const releasedAmount = releasedCount * rewardAmounts[index] * E18;
           const remaining = totalReward > releasedAmount ? totalReward - releasedAmount : 0n;
-          return { index, rewardLevel: `R${index}`, achievedAt: formatTimestamp(achievedAt), totalRewardAmount: formatEther4(totalReward), monthlyRewardAmount: formatEther4(rewardAmounts[index] * E18), installmentCount: `${releasedCount}/${rewardInstallments[index]}`, releasedAmount: formatEther4(releasedAmount), claimedCycles: Number(claimedCycles), claimedAmount: formatEther4(claimed), claimableAmount: formatEther4(BigInt(pending) + BigInt(carried)), remainingAmount: formatEther4(remaining), nextPayoutAt: "-", lastClaimAt: formatTimestamp(lastClaimAt) };
+          // A V2 rank may be only a migration snapshot from V1.  It must
+          // not replace the V1 history unless V2 itself has paid, released,
+          // or carries reward state for this rank.
+          const hasNativeV2State = BigInt(released) > 0n || BigInt(pending) > 0n ||
+            BigInt(carried) > 0n || BigInt(claimed) > 0n || BigInt(claimedCycles) > 0n;
+          return { index, hasNativeV2State, rewardLevel: `R${index}`, achievedAt: formatTimestamp(achievedAt), totalRewardAmount: formatEther4(totalReward), monthlyRewardAmount: formatEther4(rewardAmounts[index] * E18), installmentCount: `${releasedCount}/${rewardInstallments[index]}`, releasedAmount: formatEther4(releasedAmount), claimedCycles: Number(claimedCycles), claimedAmount: formatEther4(claimed), claimableAmount: formatEther4(BigInt(pending) + BigInt(carried)), remainingAmount: formatEther4(remaining), nextPayoutAt: "-", lastClaimAt: formatTimestamp(lastClaimAt) };
         }));
         const legacyV2ByIndex = new Map(legacyV2Rows.map((row) => [row.index, row]));
         const v3ByIndex = new Map([...migratedRows, ...v2Rows].map((row) => [row.index, row]));
@@ -169,7 +174,7 @@ export const Income6 = () => {
         // V3 only contains a migrated rank snapshot, show paid V2 history;
         // V1 is used only if neither newer source has that rank.
         const newerIndexes = new Set([
-          ...legacyV2ByIndex.keys(),
+          ...legacyV2Rows.filter((row) => row.hasNativeV2State).map((row) => row.index),
           ...[...v3ByIndex.values()].filter((row) => row.hasNativeV3State).map((row) => row.index),
         ]);
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_REWARD_MANAGER_ABI, provider);
@@ -203,12 +208,17 @@ export const Income6 = () => {
         const displayRows = Array.from(new Set([
           ...v1Rows.map((row) => row.index),
           ...legacyV2Rows.map((row) => row.index),
-          ...[...v3ByIndex.values()].filter((row) => row.hasNativeV3State || !legacyV2ByIndex.has(row.index)).map((row) => row.index),
+          ...[...v3ByIndex.values()].map((row) => row.index),
         ]))
           .map((index) => {
             const v3 = v3ByIndex.get(index);
-            if (v3?.hasNativeV3State || !legacyV2ByIndex.has(index)) return v3 ?? v1Rows.find((row) => row.index === index);
-            return legacyV2ByIndex.get(index) ?? v1Rows.find((row) => row.index === index);
+            const v2 = legacyV2ByIndex.get(index);
+            const v1 = v1Rows.find((row) => row.index === index);
+            // Only native state takes priority. Migration-only V2/V3 rows
+            // are fallbacks and cannot hide a real legacy V1 reward record.
+            if (v3?.hasNativeV3State) return v3;
+            if (v2?.hasNativeV2State) return v2;
+            return v1 ?? v3 ?? v2;
           })
           .filter(Boolean)
           .sort((a, b) => Number(b.achievedAt !== "-") - Number(a.achievedAt !== "-") || b.index - a.index);
