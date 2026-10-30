@@ -244,11 +244,6 @@ export const Income4 = () => {
       for (const row of v1History) {
         addPaid(row.powerLevel ?? row[5], row.claimedAmount ?? row[4], row.timestamp ?? row[6]);
       }
-      for (const [level, activatedAt] of Object.entries(v1ActivatedAtByLevel)) {
-        if (fallbackByLevel[level]) {
-          fallbackByLevel[level] = { ...fallbackByLevel[level], activatedAt };
-        }
-      }
       for (const row of legacyIncomeHistory) {
         if (Number(row.incomeType ?? row[0] ?? 0n) === 3) {
           addPaid(row.level ?? row[1], row.amount ?? row[2], row.timestamp ?? row[3]);
@@ -289,6 +284,14 @@ export const Income4 = () => {
           claimedCount: BigInt(previous.claimedCount) + BigInt(row.claimedCount ?? row[2] ?? 0n),
           lastClaimAt: BigInt(row.timestamp ?? row[6] ?? 0n) > BigInt(previous.lastClaimAt) ? BigInt(row.timestamp ?? row[6] ?? 0n) : previous.lastClaimAt,
         };
+      }
+      // Apply V1's real cycle-start time after its fallback history rows
+      // exist. A newer V2 row below can still replace the whole row under
+      // the normal V3 -> V2 -> V1 priority.
+      for (const [level, activatedAt] of Object.entries(v1ActivatedAtByLevel)) {
+        if (fallbackByLevel[level]) {
+          fallbackByLevel[level] = { ...fallbackByLevel[level], activatedAt };
+        }
       }
       // V2 is newer than V1 for a rank only if it actually has a stored
       // payment value. Otherwise retain the complete V1 historic row.
