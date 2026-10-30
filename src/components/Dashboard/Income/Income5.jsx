@@ -6,7 +6,7 @@ import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
-import { PackageManagerAddress, ReferralNetworkAddress } from "../../../blockchain/address";
+import { LegacyV2PackageManagerAddress, LegacyV2RegistryAddress, ReferralNetworkAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
@@ -99,18 +99,20 @@ export const Income5 = () => {
       if (!user || !ethers.isAddress(user)) throw new Error("Please connect your wallet.");
       if (!ethers.isAddress(ReferralNetworkAddress)) throw new Error("V2 Registry address is not configured.");
 
+      const provider = createBscReadProvider();
       const registry = new ethers.Contract(
         ReferralNetworkAddress,
         V2ReferralRegistryABI,
-        createBscReadProvider(),
+        provider,
       );
+      const legacyRegistry = new ethers.Contract(LegacyV2RegistryAddress, V2ReferralRegistryABI, provider);
       const achieved = Number(await registry.getAchievedRewardCount(user));
       const v1Provider = createV1ReadProvider();
       const v1RewardManager = new ethers.Contract(V1_MAINNET.packageManager, V1_REWARD_MANAGER_ABI, v1Provider);
       const v1RewardTimes = await Promise.all(Array.from({ length: 12 }, (_, offset) => v1RewardManager.rewardAchievedAt(user, offset + 1)));
       const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, v1Provider);
       const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
-      const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, createBscReadProvider());
+      const v2Manager = new ethers.Contract(LegacyV2PackageManagerAddress, V2PackageManagerABI, provider);
       const v1Achieved = v1RewardTimes.reduce((highest, achievedAt, offset) => BigInt(achievedAt) > 0n ? offset + 1 : highest, 0);
       // Continue from the highest reward already achieved in either V1 or
       // V2; the V2 target business is then previewed using the V2 formula.
@@ -120,10 +122,14 @@ export const Income5 = () => {
         ? await registry.rewardThreshold(nextIndex)
         : 0n;
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
-      const [v1DirectResult, v2DirectResult] = await Promise.allSettled([
+      const [v1DirectResult, legacyV2DirectResult, v3DirectResult] = await Promise.allSettled([
         (async () => {
           const count = Number(await v1Registry.getLevelUsersLength(user, 0));
           return Promise.all(Array.from({ length: count }, (_, index) => v1Registry.getLevelUserAt(user, 0, index)));
+        })(),
+        (async () => {
+          const count = Number(await legacyRegistry.getLevelUsersLength(user, 0));
+          return Promise.all(Array.from({ length: count }, (_, index) => legacyRegistry.getLevelUserAt(user, 0, index)));
         })(),
         (async () => {
           const count = Number(await registry.getLevelUsersLength(user, 0));
@@ -132,24 +138,30 @@ export const Income5 = () => {
       ]);
       const directMap = new Map();
       for (const address of v1DirectResult.status === "fulfilled" ? v1DirectResult.value : []) directMap.set(address.toLowerCase(), { address, inV1: true, inV2: false });
-      for (const address of v2DirectResult.status === "fulfilled" ? v2DirectResult.value : []) {
+      for (const address of legacyV2DirectResult.status === "fulfilled" ? legacyV2DirectResult.value : []) {
         const prior = directMap.get(address.toLowerCase());
         directMap.set(address.toLowerCase(), { address, inV1: prior?.inV1 ?? false, inV2: true });
       }
-      const legacyLegsImported = await registry.legacyLegsReady(user);
+      for (const address of v3DirectResult.status === "fulfilled" ? v3DirectResult.value : []) {
+        const prior = directMap.get(address.toLowerCase());
+        directMap.set(address.toLowerCase(), { address, inV1: prior?.inV1 ?? false, inV2: prior?.inV2 ?? false, inV3: true });
+      }
+      const legacyLegsImported = await legacyRegistry.legacyLegsReady(user).catch(() => false);
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated] = await Promise.all([
+        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated, v3LegBusiness, v3Eligible] = await Promise.all([
           member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
-          member.inV2 ? registry.users(member.address).catch(() => null) : null,
+          member.inV2 ? legacyRegistry.users(member.address).catch(() => null) : null,
           combinedPackageBusiness(member.address, v1Manager, v2Manager).catch(() => 0n),
-          member.inV2 ? registry.hasQualifiedPackage(member.address).catch(() => false) : false,
-          member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
-          member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
-          member.inV2 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
-          member.inV2 ? registry.legacyLegBusiness(user, member.address).catch(() => 0n) : 0n,
-          member.inV2 ? registry.migrated(member.address).catch(() => false) : false,
+          member.inV2 ? legacyRegistry.hasQualifiedPackage(member.address).catch(() => false) : false,
+          member.inV2 ? legacyRegistry.legacyDirectCounted(member.address).catch(() => false) : false,
+          member.inV2 ? legacyRegistry.hasEverPackage(member.address).catch(() => true) : true,
+          member.inV2 ? legacyRegistry.legBusiness(user, member.address).catch(() => 0n) : 0n,
+          member.inV2 ? legacyRegistry.legacyLegBusiness(user, member.address).catch(() => 0n) : 0n,
+          member.inV2 ? legacyRegistry.migrated(member.address).catch(() => false) : false,
+          member.inV3 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
+          member.inV3 ? Promise.all([registry.hasEverPackage(member.address).catch(() => false), registry.legacyDirectCounted(member.address).catch(() => false)]).then(([hasPackage, legacy]) => hasPackage || legacy) : false,
         ]);
-        const v2TeamBusiness = await v2NewTeamBusiness(member.address, v2User, registry);
+        const v2TeamBusiness = await v2NewTeamBusiness(member.address, v2User, legacyRegistry);
         const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v2TeamBusiness;
         const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
@@ -159,8 +171,13 @@ export const Income5 = () => {
           : 0n;
         const v2FormulaBusiness = BigInt(v2LegBusiness)
           + (legacyLegsImported || BigInt(importedLegacyBusiness) > 0n ? 0n : v1Baseline);
-        const counted = nextIndex && member.inV2 && eligible
-          ? (v2FormulaBusiness > capPerLeg ? capPerLeg : v2FormulaBusiness)
+        // V1 + legacy-V2 is the historical source of truth. V3 is used only
+        // when a direct has no historical record, so an incomplete V3 import
+        // cannot reduce or overwrite the already-qualified business.
+        const business = v2FormulaBusiness > 0n ? v2FormulaBusiness : BigInt(v3LegBusiness);
+        const canCount = v2FormulaBusiness > 0n ? eligible : Boolean(v3Eligible);
+        const counted = nextIndex && canCount
+          ? (business > capPerLeg ? capPerLeg : business)
           : 0n;
         return { sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), countedRaw: counted, status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package" };
       }));
