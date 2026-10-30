@@ -197,9 +197,6 @@ export default function V2Withdrawal() {
   }, []);
 
   const loadV1Overview = useCallback(async () => {
-    setCanWithdrawV1(false);
-    setV1Overview(null);
-    return;
     try {
       setV1Loading(true);
       setV1Message("");
