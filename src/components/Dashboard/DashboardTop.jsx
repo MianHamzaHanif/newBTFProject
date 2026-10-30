@@ -10,6 +10,7 @@ import ReferralNetworkABI from "../../blockchain/referralNetworkABI.json";
 import V2PackageManagerABI from "../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../blockchain/v2ReferralRegistryABI";
 import V2IncomeLedgerABI from "../../blockchain/v2IncomeLedgerABI";
+import LegacyV2IncomeLedgerABI from "../../blockchain/legacyV2IncomeLedgerABI";
 import {
   PackageManagerAddress,
   PackageManagerLensAddress,
@@ -228,23 +229,58 @@ const DashboardTop = () => {
       const elapsed = Math.max(0, Number(block.timestamp) - Number(startTime));
       const cycleProgress = Number(roiDay) ? elapsed % Number(roiDay) : 0;
       if (currentPackage > 0n || limit > 0n) {
-        // Plan progress must use the same de-duplicated package rows shown in
-        // Activation.  Each row already carries its source contract's exact
-        // cap and FIFO usage, so old V1/V2 history and V3 imports are counted
-        // once only.  Do not reconstruct this value from income events or
-        // ledger withdrawals: those are payouts, not package-cap usage.
+        // Plan percentage follows the requested lifetime withdrawal formula:
+        // canonical V3 -> V2 -> V1 package caps, divided into actual V1,
+        // legacy-V2 and V3 withdrawals. Migrated package mirrors therefore
+        // never enlarge the denominator.
         const combinedIncomeLimit = (packageHistory.records || []).reduce(
           (total, record) => total + BigInt(record.incomeLimit ?? 0n),
           0n,
         );
-        const combinedIncomeUsed = (packageHistory.records || []).reduce(
-          (total, record) => total + BigInt(record.usedIncome ?? 0n),
-          0n,
+        const v1Provider = new ethers.JsonRpcProvider(
+          V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true },
         );
+        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
+        const legacyLedger = new ethers.Contract(LegacyV2LedgerAddress, LegacyV2IncomeLedgerABI, v2Provider);
+        const [v1NetWithdrawn, withdrawFeeBP, legacyWithdrawLength, v3WithdrawLength] = await Promise.all([
+          v1Manager.totalIncomeWithdrawnToken(wallet).catch(() => 0n),
+          v1Manager.withdrawFeeBP().catch(() => 0n),
+          legacyLedger.getUserWithdrawHistoryLength(wallet).catch(() => 0n),
+          v2Ledger.getUserWithdrawHistoryLength(wallet).catch(() => 0n),
+        ]);
+        const [legacyWithdrawals, v3Withdrawals] = await Promise.all([
+          Promise.all(Array.from({ length: Number(legacyWithdrawLength) }, (_, index) =>
+            legacyLedger.getUserWithdrawHistoryAt(wallet, index).catch(() => null),
+          )),
+          Promise.all(Array.from({ length: Number(v3WithdrawLength) }, (_, index) =>
+            v2Ledger.getUserWithdrawHistoryAt(wallet, index).catch(() => null),
+          )),
+        ]);
+        const feeBP = BigInt(withdrawFeeBP ?? 0n);
+        // Historic V1 and legacy-V2 records store the net amount sent after
+        // the withdrawal fee. Convert to gross so plan progress reflects the
+        // income consumed from a package cap, not only the wallet payout.
+        const grossFromNet = (net) => {
+          const value = BigInt(net ?? 0n);
+          return feeBP > 0n && feeBP < 10_000n
+            ? (value * 10_000n) / (10_000n - feeBP)
+            : value;
+        };
+        const legacyNetWithdrawn = legacyWithdrawals.reduce(
+          (total, record) => total + BigInt(record?.amount ?? record?.[0] ?? 0n), 0n,
+        );
+        // V3 retains the gross amount explicitly, so no fee reconstruction
+        // is needed for newly-created withdrawal records.
+        const v3GrossWithdrawn = v3Withdrawals.reduce(
+          (total, record) => total + BigInt(record?.grossAmount ?? record?.[0] ?? 0n), 0n,
+        );
+        const totalWithdrawn = grossFromNet(v1NetWithdrawn)
+          + grossFromNet(legacyNetWithdrawn)
+          + v3GrossWithdrawn;
         const displayLimit = combinedIncomeLimit > 0n ? combinedIncomeLimit : BigInt(limit);
-        const cappedUsed = combinedIncomeUsed > displayLimit ? displayLimit : combinedIncomeUsed;
+        const cappedWithdrawn = totalWithdrawn > displayLimit ? displayLimit : totalWithdrawn;
         setPlanActivity({
-          progressText: displayLimit > 0n ? `${toPercent2(cappedUsed, displayLimit)}% / 100%` : "0% / 100%",
+          progressText: displayLimit > 0n ? `${toPercent2(cappedWithdrawn, displayLimit)}% / 100%` : "0% / 100%",
           activeStakeLabel: `Combined income limit: ${formatEther2(displayLimit)} USDT`,
           selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfReady)} ${SettlementTokenSymbol}`,
           remainingSeconds: Number(roiDay) ? Number(roiDay) - cycleProgress : 0,
