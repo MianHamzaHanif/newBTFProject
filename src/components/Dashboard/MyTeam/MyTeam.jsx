@@ -1,6 +1,5 @@
-import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import CustomTable from "../CommonComponents/CustomTable";
 import { ethers } from "ethers";
 import ReferralNetworkABI from "../../../blockchain/referralNetworkABI.json";
@@ -77,11 +76,6 @@ export const MyTeam = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [teamReadAddress, setTeamReadAddress] = useState("");
-  const [selectedRow, setSelectedRow] = useState(null);
-  const [detailRows, setDetailRows] = useState([]);
-  const [isDetailsLoading, setIsDetailsLoading] = useState(false);
-  const [detailsError, setDetailsError] = useState("");
-  const detailPanelRef = useRef(null);
 
   const levelButtons = Array.from({ length: 15 }, (_, i) => i + 1);
 
@@ -93,7 +87,6 @@ export const MyTeam = () => {
     { id: "packageUsdt", label: "Total Package (USDT)", sortable: true },
     { id: "totalTeam", label: "Total Team", sortable: true },
     { id: "totalTeamDeposit", label: "Total Team Deposit", sortable: true },
-    { id: "action", label: "Open", sortable: false },
   ];
 
   const formatTimestamp = (value) => {
@@ -124,13 +117,6 @@ export const MyTeam = () => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
-  const detailColumns = [
-    { id: "sno", label: "S. No", sortable: true },
-    { id: "walletAddress", label: "Address", sortable: true },
-    { id: "amount", label: "Amount USDT", sortable: true },
-    { id: "roi", label: "ROI", sortable: true },
-  ];
-
   const getWalletAddress = async () => {
     if (!window.ethereum) {
       return "";
@@ -153,86 +139,6 @@ export const MyTeam = () => {
     // of this lifetime "Total Package" value.
     const { records } = await loadPrioritizedPackageHistory(address);
     return records.reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
-  };
-
-  const fetchTeamDetails = async (downlineAddress) => {
-    if (!window.ethereum || !downlineAddress) {
-      setDetailRows([]);
-      setDetailsError("");
-      return;
-    }
-
-    try {
-      setIsDetailsLoading(true);
-      setDetailsError("");
-      const uplineAddress = await getWalletAddress();
-      if (!uplineAddress) {
-        setDetailRows([]);
-        return;
-      }
-
-      const provider = createV2ReadProvider();
-      const referralContract = new ethers.Contract(
-        V3ReferralRegistryAddress,
-        ReferralNetworkABI,
-        provider,
-      );
-      const packageManager = new ethers.Contract(
-        PackageManagerAddress,
-        V2PackageManagerABI,
-        provider,
-      );
-
-      const packageLengthRaw = await packageManager.getPackageHistoryLength(downlineAddress);
-      const packageLength = Number(packageLengthRaw ?? 0n);
-      const nextRows = [];
-      const levelIndex = selectedLevel - 1;
-
-      for (let index = 0; index < packageLength; index += 1) {
-        const stakeData = await readPackageHistory(packageManager, downlineAddress, index);
-        let roiRaw = 0n;
-
-        try {
-          roiRaw = await referralContract.getLevelRoiClaimableFromUserStake(
-            uplineAddress,
-            levelIndex,
-            downlineAddress,
-            index,
-          );
-        } catch {
-          roiRaw = 0n;
-        }
-
-        nextRows.push({
-          sno: index + 1,
-          walletAddress: downlineAddress,
-          amount: formatEther4(stakeData?.amount ?? stakeData?.[0] ?? 0n),
-          roi: formatEther4(roiRaw ?? 0n),
-        });
-      }
-
-      setDetailRows(nextRows);
-      if (nextRows.length === 0) {
-        setDetailsError("No package history found for this team user.");
-      }
-    } catch {
-      setDetailRows([]);
-      setDetailsError("Failed to load team history.");
-    } finally {
-      setIsDetailsLoading(false);
-    }
-  };
-
-  const handleToggleDetails = (row) => {
-    if (selectedRow?.address?.toLowerCase() === row.address.toLowerCase()) {
-      setSelectedRow(null);
-      setDetailRows([]);
-      setDetailsError("");
-      return;
-    }
-
-    setSelectedRow(row);
-    fetchTeamDetails(row.address);
   };
 
   useEffect(() => {
@@ -336,15 +242,9 @@ export const MyTeam = () => {
         } else {
           setLoadError("");
         }
-        setSelectedRow(null);
-        setDetailRows([]);
-        setDetailsError("");
       } catch (error) {
         setRows([]);
         setLoadError(error?.shortMessage || error?.message || `Could not load Level ${selectedLevel} team data.`);
-        setSelectedRow(null);
-        setDetailRows([]);
-        setDetailsError("");
       } finally {
         setIsLoading(false);
       }
@@ -352,17 +252,6 @@ export const MyTeam = () => {
 
     fetchLevelUsers();
   }, [selectedLevel]);
-
-  useEffect(() => {
-    if (!selectedRow || !detailPanelRef.current) {
-      return;
-    }
-
-    detailPanelRef.current.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  }, [selectedRow, detailRows, detailsError]);
 
   return (
     <div className="page-container">
@@ -390,112 +279,15 @@ export const MyTeam = () => {
             rows={rows}
             renderRow={(row) => (
               <>
-                <TableCell
-                  align="center"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {row.sno}
-                </TableCell>
-                <TableCell
-                  align="center"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {formatAddressShort(row.address)}
-                </TableCell>
-                <TableCell
-                  align="center"
-                  className="team-time-cell"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {row.registeredAt}
-                </TableCell>
-                {/* <TableCell
-                  align="center"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {row.packageToken}
-                </TableCell> */}
-                <TableCell
-                  align="center"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {row.packageUsdt}
-                </TableCell>
-                <TableCell
-                  align="center"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {row.totalTeam}
-                </TableCell>
-                <TableCell
-                  align="center"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  {row.totalTeamDeposit}
-                </TableCell>
-                <TableCell
-                  align="center"
-                  onClick={() => handleToggleDetails(row)}
-                  sx={{ cursor: "pointer" }}
-                >
-                  <i
-                    className={`bi bi-chevron-${
-                      selectedRow?.address?.toLowerCase() === row.address.toLowerCase()
-                        ? "up"
-                        : "down"
-                    }`}
-                  ></i>
-                </TableCell>
+                <TableCell align="center">{row.sno}</TableCell>
+                <TableCell align="center">{formatAddressShort(row.address)}</TableCell>
+                <TableCell align="center" className="team-time-cell">{row.registeredAt}</TableCell>
+                <TableCell align="center">{row.packageUsdt}</TableCell>
+                <TableCell align="center">{row.totalTeam}</TableCell>
+                <TableCell align="center">{row.totalTeamDeposit}</TableCell>
               </>
             )}
           />
-
-          {selectedRow && (
-            <div className="team-detail-panel" ref={detailPanelRef}>
-              <div className="team-detail-header">
-                <h2>Address</h2>
-                <button
-                  className="team-detail-close"
-                  onClick={() => {
-                    setSelectedRow(null);
-                    setDetailRows([]);
-                    setDetailsError("");
-                  }}
-                >
-                  <i className="bi bi-x-lg"></i>
-                </button>
-              </div>
-              <p className="team-detail-address">{selectedRow.address}</p>
-              <h2>ROI</h2>
-              {isDetailsLoading && <p className="team-loading">Loading ROI details...</p>}
-              {!isDetailsLoading && detailsError && (
-                <p className="team-loading">{detailsError}</p>
-              )}
-              <div className="team-detail-scroll">
-                <CustomTable
-                  columns={detailColumns}
-                  rows={detailRows}
-                  renderRow={(row) => (
-                    <>
-                      <TableCell align="center">{row.sno}</TableCell>
-                      <TableCell align="center">
-                        {formatAddressShort(row.walletAddress)}
-                      </TableCell>
-                      <TableCell align="center">{row.amount}</TableCell>
-                      <TableCell align="center">{row.roi}</TableCell>
-                    </>
-                  )}
-                />
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
