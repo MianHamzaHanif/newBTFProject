@@ -213,6 +213,11 @@ const DashboardTop = () => {
       const v2Manager = new ethers.Contract(PackageManagerAddress, V2PackageManagerABI, v2Provider);
       const v2Lens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, v2Provider);
       const v2Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, v2Provider);
+      const legacyManager = new ethers.Contract(
+        LegacyV2PackageManagerAddress,
+        V2PackageManagerABI,
+        v2Provider,
+      );
       {
       const [currentPackage, limit, used, selfReady, roiDay, startTime, block, packageHistory] = await Promise.all([
         v2Manager.currentPackage(wallet), v2Manager.totalIncomeLimit(wallet),
@@ -225,8 +230,7 @@ const DashboardTop = () => {
       if (currentPackage > 0n || limit > 0n) {
         // Match the original dashboard: plan progress is lifetime combined
         // earnings against the de-duplicated V1+V2+V3 package cap, not only
-        // the current active package. For user 55 this is the 2,150 cap
-        // shown on the original domain.
+        // the current active package.
         const combinedIncomeLimit = (packageHistory.records || []).reduce(
           (total, record) => total + BigInt(record.incomeLimit ?? 0n),
           0n,
@@ -236,12 +240,17 @@ const DashboardTop = () => {
         );
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
         const legacyLedger = new ethers.Contract(LegacyV2LedgerAddress, V2IncomeLedgerABI, v2Provider);
-        const [v1Net, v1Wallet, feeBP, legacyIncomeLength, readyAmounts] = await Promise.all([
+        const [
+          v1Net, v1Wallet, feeBP, legacyIncomeLength, readyAmounts,
+          v3SelfRoiGenerated, legacySelfRoiGenerated,
+        ] = await Promise.all([
           v1Manager.totalIncomeWithdrawnToken(wallet),
           v1Manager.incomeWalletToken(wallet),
           v1Manager.withdrawFeeBP(),
           legacyLedger.getUserIncomeHistoryLength(wallet),
           Promise.all(Array.from({ length: 5 }, (_, incomeType) => v2Lens.getIncomeReady(wallet, incomeType).catch(() => 0n))),
+          v2Manager.selfRoiGenerated(wallet).catch(() => 0n),
+          legacyManager.selfRoiGenerated(wallet).catch(() => 0n),
         ]);
         let legacyClaimed = 0n;
         const historyLength = Number(legacyIncomeLength ?? 0n);
@@ -255,7 +264,14 @@ const DashboardTop = () => {
           ? (BigInt(v1Net) * v1FeeBP) / (10_000n - v1FeeBP)
           : 0n) + BigInt(v1Wallet);
         const readyIncome = readyAmounts.reduce((total, amount) => total + BigInt(amount ?? 0n), 0n);
-        const combinedEarned = v1Gross + legacyClaimed + readyIncome;
+        // A migrated package's V2 baseline is already in `legacyClaimed`.
+        // Only the additional ROI accrued after the V3 migration belongs in
+        // this dashboard total; adding the complete V3 generated value would
+        // count the V2 baseline twice.
+        const postMigrationSelfRoi = BigInt(v3SelfRoiGenerated ?? 0n) > BigInt(legacySelfRoiGenerated ?? 0n)
+          ? BigInt(v3SelfRoiGenerated) - BigInt(legacySelfRoiGenerated)
+          : 0n;
+        const combinedEarned = v1Gross + legacyClaimed + readyIncome + postMigrationSelfRoi;
         const displayLimit = combinedIncomeLimit > 0n ? combinedIncomeLimit : BigInt(limit);
         const cappedEarned = combinedEarned > displayLimit ? displayLimit : combinedEarned;
         setPlanActivity({
