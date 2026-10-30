@@ -269,6 +269,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
         usedIncome: null,
         aggregateUsed: BigInt(aggregateUsed ?? 0n),
         active,
+        legacyV1Mirror: Boolean(record.legacyV1Mirror),
         migratedToV3: Boolean(migratedToV3),
       };
     });
@@ -307,6 +308,10 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   const v3Data = v3Result.status === "fulfilled" ? v3Result.value : emptyVersion;
   const v2 = v2Data.records;
   const v3 = v3Data.records;
+  // `v1IndexRegistered` is an explicit source-index registration in the V3
+  // migration contract. It wins over purchase timestamps: V3 stores its own
+  // import timestamp, while V1 retains the original purchase timestamp.
+  const v1AlreadyInV3 = v1.filter((record) => record.migratedToV3);
   if (v1Result.status === "rejected") failures.push("V1 history could not be loaded");
   if (v2Result.status === "rejected") failures.push("V2 history could not be loaded");
   if (v3Result.status === "rejected") failures.push("V3 history could not be loaded");
@@ -343,11 +348,18 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   const v3Coverage = countRecords(v3WithSource);
   const v2NotRepresentedInV3 = v2.filter((record) => (
     !pairedV2Indexes.has(record.sourceIndex)
+    // A legacy V2 row whose original V1 purchase is explicitly registered in
+    // V3 is only a bridge copy. V3 is the one authoritative visible record.
+    && !(record.legacyV1Mirror && v1AlreadyInV3.some((v1Record) => (
+      v1Record.timestamp === record.timestamp
+      && v1Record.amount === record.amount
+    )))
   ));
   const visibleV2 = removeCovered(v2NotRepresentedInV3, v3Coverage);
   // All V2 rows (including a V2 row already represented by V3) cover their
   // matching V1 legacy copy. Any V3 row left after V2 matching is V1-only.
-  const v1AfterV2 = removeCovered(v1, countRecords(visibleV2));
+  const v1NotRegisteredInV3 = v1.filter((record) => !record.migratedToV3);
+  const v1AfterV2 = removeCovered(v1NotRegisteredInV3, countRecords(visibleV2));
   const visibleV1 = removeCovered(v1AfterV2, v3Coverage);
   const records = [...visibleV1, ...visibleV2, ...v3WithSource]
     .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
