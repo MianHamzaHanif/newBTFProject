@@ -100,13 +100,13 @@ export default function V2ClaimIncome() {
     try {
       setLoading(true);
       setMessage("");
+      const readProvider = createBscReadProvider();
       const packageManager = new ethers.Contract(
         PackageManagerAddress,
-        ["function getIncomeReady(address user,uint8 incomeType) view returns (uint256)"],
-        createBscReadProvider()
+        V2PackageManagerABI,
+        readProvider,
       );
-      const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, createBscReadProvider());
-      const readProvider = createBscReadProvider();
+      const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, readProvider);
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
       const nextRows = await Promise.all(
         claimActions.map(async (action, index) => {
@@ -118,7 +118,15 @@ export default function V2ClaimIncome() {
             // combined here; users claim only against the V3 deployment.
             currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
           } catch {
-            currentAmount = 0n;
+            // The deployed lens can revert for a Level ROI preview even
+            // though the Manager can settle and pay that same amount. A
+            // static call executes the identical claim calculation without
+            // changing blockchain state, so it is the accurate fallback.
+            try {
+              currentAmount = await packageManager[action.method].staticCall({ from: wallet });
+            } catch {
+              currentAmount = 0n;
+            }
           }
           if (
             action.incomeType === 3
