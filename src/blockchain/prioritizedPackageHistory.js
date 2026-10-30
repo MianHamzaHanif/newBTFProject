@@ -378,6 +378,9 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
         return {
           ...record,
           legacyV1Mirror: true,
+          // V3 stores the import block time.  For a migrated package the
+          // activation table must retain the original V1 purchase time.
+          timestamp: v1Source.timestamp,
           maximum: record.maximum === 0n ? v1Source.maximum : record.maximum,
           generated: record.generated === 0n ? v1Source.generated : record.generated,
         };
@@ -402,6 +405,9 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
       ...record,
       migratedV2Index: matched.sourceIndex,
       legacyV1Mirror: Boolean(matched.legacyV1Mirror),
+      // This is an imported V2 package, not a new V3 purchase.  Preserve its
+      // original purchase timestamp rather than displaying migration time.
+      timestamp: matched.timestamp,
       maximum: record.maximum === 0n ? matched.maximum : record.maximum,
       // V3's compact history storage keeps the ROI maximum but not the
       // legacy generated amount. Restore it independently of `maximum`;
