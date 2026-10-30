@@ -400,13 +400,11 @@ export const Income4 = () => {
     ? visibleV2Claimed + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n)
     : BigInt(details?.totalClaimed ?? 0n) + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n);
   const displayedReleasedCount = v1BaselineAuthoritative && !hasHigherV2Power
-    ? (() => {
-        const startedAt = BigInt(v1Power?.activatedAt ?? 0n);
-        const day = BigInt(v1Power?.day ?? 0n);
-        if (!startedAt || !day || powerTiming.now < startedAt) return Number(v1Power?.claimedCount ?? 0n);
-        const released = ((powerTiming.now - startedAt) / (10n * day)) + 1n;
-        return Number(released > 20n ? 20n : released);
-      })()
+    // Do not derive historic V1 releases from V3's test/ROI interval. The
+    // V1 history has the authoritative completed-cycle count for this known
+    // incomplete snapshot (6), and time arithmetic would incorrectly reach
+    // 20/20.
+    ? Number(v1Power?.claimedCount ?? 0n)
     : Number(details?.releasedCount ?? 0n);
   const displayedClaimedCount = v1BaselineAuthoritative && !hasHigherV2Power
     ? Number(v1Power?.claimedCount ?? 0n)
@@ -428,9 +426,20 @@ export const Income4 = () => {
     const hasV3Snapshot = !v1BaselineAuthoritative && (BigInt(item.releasedCount ?? 0n) !== 0n ||
       BigInt(item.claimedAmount ?? 0n) !== 0n || BigInt(item.claimedCount ?? 0n) !== 0n ||
       BigInt(item.pendingAmount ?? 0n) !== 0n || Number(item.level) === nativeActiveLevel);
-    const displayed = hasV3Snapshot ? item : (fallback ?? item);
+    const isOverriddenV1Level = v1BaselineAuthoritative
+      && Number(item.level) === Number(v1Power?.level ?? 0n);
+    const displayed = isOverriddenV1Level
+      ? {
+          ...item,
+          activatedAt: v1Power.activatedAt,
+          releasedCount: v1Power.claimedCount,
+          claimedCount: v1Power.claimedCount,
+          claimedAmount: v1Power.totalClaimed,
+          lastClaimAt: v1Power.lastClaimAt,
+        }
+      : hasV3Snapshot ? item : (fallback ?? item);
     let releasedCount = Number(displayed.releasedCount ?? 0n);
-    if (Number(displayed.level) === activeLevel && displayed.activatedAt && powerTiming.now >= displayed.activatedAt) {
+    if (!isOverriddenV1Level && Number(displayed.level) === activeLevel && displayed.activatedAt && powerTiming.now >= displayed.activatedAt) {
       const virtualReleased = ((powerTiming.now - displayed.activatedAt) / (10n * powerTiming.roiDay)) + 1n;
       releasedCount = Math.max(releasedCount, Number(virtualReleased > 20n ? 20n : virtualReleased));
     }
