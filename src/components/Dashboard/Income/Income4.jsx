@@ -42,6 +42,10 @@ const V1_POWER_MANAGER_ABI = [
   "function getPowerHistoryLength(address) view returns(uint256)",
   "function getPowerHistoryAt(address,uint256) view returns(address sourceUser,uint256 sourceDepositAmount,uint256 claimedCount,uint256 releasedAmount,uint256 claimedAmount,uint256 powerLevel,uint256 timestamp)",
 ];
+const V1_WITHDRAW_FLUSH_ABI = [
+  "function getUserWithdrawSummaryRecordsLength(address user) view returns(uint256)",
+  "function getUserWithdrawSummaryFlushAt(address user,uint256 index) view returns(uint256 directFlushed,uint256 selfRoiFlushed,uint256 levelRoiFlushed,uint256 powerFlushed,uint256 rewardFlushed)",
+];
 const V1_POWER_MODULE_ABI = [
   "function activePowerLevel(address) view returns(uint256)",
   "function powerLevelStartedAt(address) view returns(uint256)",
@@ -208,6 +212,13 @@ export const Income4 = () => {
       const v1History = await Promise.all(
         Array.from({ length: v1HistoryLength }, (_, index) => v1Manager.getPowerHistoryAt(user, index)),
       );
+      const v1Referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_WITHDRAW_FLUSH_ABI, provider);
+      const v1FlushHistoryLength = Number(await v1Referral.getUserWithdrawSummaryRecordsLength(user).catch(() => 0n));
+      const v1FlushRecords = await Promise.all(
+        Array.from({ length: v1FlushHistoryLength }, (_, index) =>
+          v1Referral.getUserWithdrawSummaryFlushAt(user, index).catch(() => null),
+        ),
+      );
       // `getPowerHistoryAt` carries a payout/next-payout timestamp, not a
       // rank-achievement timestamp. The Power module's cycle history is the
       // authoritative source for each rank's actual started/achieved time.
@@ -230,6 +241,18 @@ export const Income4 = () => {
       // every real V1/V2/V3 claim record by P-level so a migrated counter or
       // an incomplete snapshot can never erase already-paid income in UI.
       const paidByLevel = new Map();
+      const v1PaidByLevel = new Map();
+      const addV1Paid = (levelRaw, amountRaw, timestampRaw) => {
+        const level = Number(levelRaw ?? 0n);
+        const amount = BigInt(amountRaw ?? 0n);
+        if (!level || amount === 0n) return;
+        const previous = v1PaidByLevel.get(level) ?? { amount: 0n, lastClaimAt: 0n };
+        const timestamp = BigInt(timestampRaw ?? 0n);
+        v1PaidByLevel.set(level, {
+          amount: previous.amount + amount,
+          lastClaimAt: timestamp > previous.lastClaimAt ? timestamp : previous.lastClaimAt,
+        });
+      };
       const addPaid = (levelRaw, amountRaw, timestampRaw) => {
         const level = Number(levelRaw ?? 0n);
         const amount = BigInt(amountRaw ?? 0n);
@@ -242,7 +265,24 @@ export const Income4 = () => {
         });
       };
       for (const row of v1History) {
-        addPaid(row.powerLevel ?? row[5], row.claimedAmount ?? row[4], row.timestamp ?? row[6]);
+        addV1Paid(row.powerLevel ?? row[5], row.powerIncomeAmount ?? row[4], row.timestamp ?? row[6]);
+      }
+      // V1's Power-history amount is gross scheduled income. The V1 withdraw
+      // summary records flushes separately and does not carry a P-level. A
+      // flush happens after earlier payouts, therefore deduct it from the
+      // newest/highest V1 levels first; this produces the actual net paid
+      // amount without subtracting a V2/V3 flush twice (their ledgers store
+      // credited/net income only).
+      let v1PowerFlushRemaining = v1FlushRecords.reduce(
+        (total, record) => total + BigInt(record?.powerFlushed ?? record?.[3] ?? 0n),
+        0n,
+      );
+      const v1NetRows = [...v1PaidByLevel.entries()]
+        .sort(([, a], [, b]) => Number(b.lastClaimAt - a.lastClaimAt));
+      for (const [level, entry] of v1NetRows) {
+        const flushed = entry.amount > v1PowerFlushRemaining ? v1PowerFlushRemaining : entry.amount;
+        v1PowerFlushRemaining -= flushed;
+        addPaid(level, entry.amount - flushed, entry.lastClaimAt);
       }
       for (const row of legacyIncomeHistory) {
         if (Number(row.incomeType ?? row[0] ?? 0n) === 3) {
