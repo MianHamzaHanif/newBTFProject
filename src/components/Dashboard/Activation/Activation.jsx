@@ -68,7 +68,7 @@ export const Activation = () => {
 
         setRows(records.map((record, index) => ({
           ...record, sno: index + 1,
-          packageAmount: `${formatAmount(record.amount)} ${tokenFor(record.source)}`,
+          packageAmount: formatAmount(record.amount),
           purchasedAt: formatTime(record.timestamp), roiMaximum: `${formatAmount(record.maximum)} ${tokenFor(record.source)}`,
           usedIncomeDisplay: record.usedIncome === null ? "-" : `${formatAmount(record.usedIncome)} ${tokenFor(record.source)}`,
           status: record.active ? (record.generated < record.maximum ? "Active - ROI Running" : "Active - Self ROI Complete") : "Inactive",
