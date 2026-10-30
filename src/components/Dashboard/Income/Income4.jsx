@@ -312,29 +312,70 @@ export const Income4 = () => {
       let nextThreshold = 0n;
       let nextQualified = 0n;
       if (nextPowerLevel) {
-        // Legacy leg business has already been imported into V3. Preview the
-        // V3 Registry state only; adding V1/V2 again would double-count it.
-        const [threshold, directCount] = await Promise.all([
+        // V3 normally owns the migrated leg value. Some historic accounts,
+        // however, have an incomplete V3 leg snapshot even though their V2
+        // leg was valid. In that case reconstruct the exact V1 + V2 value
+        // used by the legacy application; never add both values together.
+        const legacyBusinessRegistry = new ethers.Contract(
+          LegacyV2RegistryAddress,
+          V2ReferralRegistryABI,
+          provider,
+        );
+        const v1BusinessRegistry = new ethers.Contract(
+          V1_MAINNET.referralNetwork,
+          V2ReferralRegistryABI,
+          provider,
+        );
+        const [threshold, v3DirectCount, v1DirectCount, legacyV2DirectCount, legacyLegsImported] = await Promise.all([
           registry.powerThreshold(nextPowerLevel),
           registry.getLevelUsersLength(user, 0),
+          v1BusinessRegistry.getLevelUsersLength(user, 0).catch(() => 0n),
+          legacyBusinessRegistry.getLevelUsersLength(user, 0).catch(() => 0n),
+          legacyBusinessRegistry.legacyLegsReady(user).catch(() => false),
         ]);
         nextThreshold = BigInt(threshold);
-        const directIndexes = Array.from({ length: Number(directCount) }, (_, index) => index);
-        const directs = await readInBatches(
-          directIndexes,
-          (index) => registry.getLevelUserAt(user, 0, index),
+        const readDirects = async (source, count) => readInBatches(
+          Array.from({ length: Number(count) }, (_, index) => index),
+          (index) => source.getLevelUserAt(user, 0, index),
         );
+        const [v3Directs, v1Directs, legacyV2Directs] = await Promise.all([
+          readDirects(registry, v3DirectCount),
+          readDirects(v1BusinessRegistry, v1DirectCount),
+          readDirects(legacyBusinessRegistry, legacyV2DirectCount),
+        ]);
+        const directMap = new Map();
+        for (const direct of [...v3Directs, ...v1Directs, ...legacyV2Directs]) {
+          directMap.set(direct.toLowerCase(), direct);
+        }
         const perLegCap = (nextThreshold * POWER_LEG_CAP_BPS) / BASIS_POINTS;
-        const legQualified = await readInBatches(directs, async (direct) => {
-          const [business, hasEverPackage, legacyCounted] = await Promise.all([
-            registry.legBusiness(user, direct),
-            registry.hasEverPackage(direct),
-            registry.legacyDirectCounted(direct),
+        const legQualified = await readInBatches([...directMap.values()], async (direct) => {
+          const [v3Business, v3HasPackage, v3LegacyCounted, v1User, legacyV2Business, legacyV2Imported, legacyV2DirectMigrated, legacyV2HasPackage, legacyV2LegacyCounted] = await Promise.all([
+            registry.legBusiness(user, direct).catch(() => 0n),
+            registry.hasEverPackage(direct).catch(() => false),
+            registry.legacyDirectCounted(direct).catch(() => false),
+            v1BusinessRegistry.users(direct).catch(() => null),
+            legacyBusinessRegistry.legBusiness(user, direct).catch(() => 0n),
+            legacyBusinessRegistry.legacyLegBusiness(user, direct).catch(() => 0n),
+            legacyBusinessRegistry.migrated(direct).catch(() => false),
+            legacyBusinessRegistry.hasEverPackage(direct).catch(() => false),
+            legacyBusinessRegistry.legacyDirectCounted(direct).catch(() => false),
           ]);
-          const eligible = Boolean(hasEverPackage) || Boolean(legacyCounted);
+          const v3Eligible = Boolean(v3HasPackage) || Boolean(v3LegacyCounted);
+          const legacyEligible = Boolean(legacyV2HasPackage) || Boolean(legacyV2LegacyCounted);
+          const v1Baseline = legacyV2DirectMigrated && v1User
+            ? BigInt(v1User.totalTeamDeposit ?? v1User[4] ?? 0n)
+              + BigInt(v1User.selfDeposit ?? v1User[5] ?? 0n)
+            : 0n;
+          const legacyBusiness = BigInt(legacyV2Business)
+            + (legacyLegsImported || BigInt(legacyV2Imported) > 0n ? 0n : v1Baseline);
+          // Prefer an actually populated V3 value. A zero V3 value is not a
+          // valid replacement for an existing V1/V2 leg, so fall back.
+          const business = BigInt(v3Business) > 0n
+            ? BigInt(v3Business)
+            : legacyBusiness;
+          const eligible = BigInt(v3Business) > 0n ? v3Eligible : legacyEligible;
           if (!eligible) return 0n;
-          const v3Business = BigInt(business);
-          return v3Business > perLegCap ? perLegCap : v3Business;
+          return business > perLegCap ? perLegCap : business;
         });
         nextQualified = legQualified.reduce((total, amount) => total + amount, 0n);
       }
@@ -439,9 +480,6 @@ export const Income4 = () => {
     Number(v1Power?.level ?? 0n),
   );
   const hasHigherV2Power = v1BaselineAuthoritative && nativeActiveLevel > Number(v1Power?.level ?? 0n);
-  const nextLevel = nextPowerProgress.level;
-  const qualified = formatUsdt(nextPowerProgress.qualified);
-  const required = formatUsdt(nextPowerProgress.required);
   const powerTime = v1BaselineAuthoritative && !hasHigherV2Power
     ? BigInt(v1Power?.activatedAt ?? 0n)
     : BigInt(finalizedInV1 ? 0n : legacyPower?.originalAchievedAt ?? 0n) || BigInt(details?.activatedAt ?? 0n) || registryAchievementAt || BigInt(v1Power?.activatedAt ?? 0n);
@@ -575,12 +613,6 @@ export const Income4 = () => {
           `Released: ${displayedReleasedCount} | Claimed: ${displayedClaimedCount}`,
         )}
         {card("Power Last Claim At", formatTime(displayedLastClaimAt))}
-        {card("Next Achieve Power", nextLevel ? `P${nextLevel}` : "Max achieved")}
-        {card(
-          "Next Achieve Power Business",
-          required,
-          `Qualified business: ${qualified}`,
-        )}
         {card(
           "Next Power Payout At",
           // A historical migrated schedule (for example P2) must not
