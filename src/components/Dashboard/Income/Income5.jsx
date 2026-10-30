@@ -1,15 +1,13 @@
-import { readPackageHistory } from "../../../blockchain/packageHistory";
 import { TableCell } from "@mui/material";
 import React, { useCallback, useEffect, useState } from "react";
 import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
-import PackageManagerABI from "../../../blockchain/packageMangerABI.json";
-import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
-import { LegacyV2PackageManagerAddress, LegacyV2RegistryAddress, ReferralNetworkAddress } from "../../../blockchain/address";
+import { ReferralNetworkAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { loadPrioritizedPackageHistory } from "../../../blockchain/prioritizedPackageHistory";
 import "../styles/style.css";
 
 const V1_REWARD_MANAGER_ABI = ["function rewardAchievedAt(address user,uint256 index) view returns(uint256)"];
@@ -36,40 +34,9 @@ const createV1ReadProvider = () => {
   return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
 };
 
-const combinedPackageBusiness = async (address, v1Manager, v2Manager) => {
-  const [v1LengthRaw, v2LengthRaw] = await Promise.all([
-    v1Manager.getStakeHistoryLength(address).catch(() => 0n), v2Manager.getPackageHistoryLength(address).catch(() => 0n),
-  ]);
-  const [v1Stakes, v2Packages] = await Promise.all([
-    Promise.all(Array.from({ length: Number(v1LengthRaw) }, (_, index) => v1Manager.userStakeHistory(address, index))),
-    Promise.all(Array.from({ length: Number(v2LengthRaw) }, (_, index) => readPackageHistory(v2Manager, address, index))),
-  ]);
-  const importedKeys = new Map();
-  const v1Total = v1Stakes.reduce((total, stake) => {
-    const amount = BigInt(stake?.packageValue ?? stake?.[0] ?? 0n), timestamp = BigInt(stake?.timestamp ?? stake?.[7] ?? 0n);
-    const key = `${amount}:${timestamp}`;
-    importedKeys.set(key, (importedKeys.get(key) || 0) + 1);
-    return total + amount;
-  }, 0n);
-  return v1Total + v2Packages.reduce((total, record) => {
-    const amount = BigInt(record?.amount ?? record?.[0] ?? 0n), timestamp = BigInt(record?.purchasedAt ?? record?.[1] ?? 0n);
-    const key = `${amount}:${timestamp}`, imported = importedKeys.get(key) || 0;
-    if (imported) { importedKeys.set(key, imported - 1); return total; }
-    return total + amount;
-  }, 0n);
-};
-
-// `totalTeamDeposit` in V2 includes the one-time V1 level-business seed.
-// For a V1 + V2 display, add V1 once and only the portion created in V2.
-const v2NewTeamBusiness = async (address, v2User, registry) => {
-  const v2Total = BigInt(v2User?.totalTeamDeposit ?? v2User?.[4] ?? 0n);
-  if (!v2User || v2Total === 0n) return 0n;
-  const seededV1Business = (await Promise.all(
-    Array.from({ length: 15 }, (_, level) =>
-      registry.legacyLevelRemaining(address, level).catch(() => 0n),
-    ),
-  )).reduce((total, amount) => total + BigInt(amount), 0n);
-  return v2Total > seededV1Business ? v2Total - seededV1Business : 0n;
+const combinedPackageBusiness = async (address) => {
+  const { records } = await loadPrioritizedPackageHistory(address);
+  return records.reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
 };
 
 // V3's total can contain the imported legacy level seed. Only the portion
@@ -118,14 +85,11 @@ export const Income5 = () => {
         V2ReferralRegistryABI,
         provider,
       );
-      const legacyRegistry = new ethers.Contract(LegacyV2RegistryAddress, V2ReferralRegistryABI, provider);
       const achieved = Number(await registry.getAchievedRewardCount(user));
       const v1Provider = createV1ReadProvider();
       const v1RewardManager = new ethers.Contract(V1_MAINNET.packageManager, V1_REWARD_MANAGER_ABI, v1Provider);
       const v1RewardTimes = await Promise.all(Array.from({ length: 12 }, (_, offset) => v1RewardManager.rewardAchievedAt(user, offset + 1)));
       const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, v1Provider);
-      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
-      const v2Manager = new ethers.Contract(LegacyV2PackageManagerAddress, V2PackageManagerABI, provider);
       const v1Achieved = v1RewardTimes.reduce((highest, achievedAt, offset) => BigInt(achievedAt) > 0n ? offset + 1 : highest, 0);
       // Continue from the highest reward already achieved in either V1 or
       // V2; the V2 target business is then previewed using the V2 formula.
@@ -135,14 +99,10 @@ export const Income5 = () => {
         ? await registry.rewardThreshold(nextIndex)
         : 0n;
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
-      const [v1DirectResult, legacyV2DirectResult, v3DirectResult] = await Promise.allSettled([
+      const [v1DirectResult, v3DirectResult] = await Promise.allSettled([
         (async () => {
           const count = Number(await v1Registry.getLevelUsersLength(user, 0));
           return Promise.all(Array.from({ length: count }, (_, index) => v1Registry.getLevelUserAt(user, 0, index)));
-        })(),
-        (async () => {
-          const count = Number(await legacyRegistry.getLevelUsersLength(user, 0));
-          return Promise.all(Array.from({ length: count }, (_, index) => legacyRegistry.getLevelUserAt(user, 0, index)));
         })(),
         (async () => {
           const count = Number(await registry.getLevelUsersLength(user, 0));
@@ -151,62 +111,30 @@ export const Income5 = () => {
       ]);
       const directMap = new Map();
       for (const address of v1DirectResult.status === "fulfilled" ? v1DirectResult.value : []) directMap.set(address.toLowerCase(), { address, inV1: true, inV2: false });
-      for (const address of legacyV2DirectResult.status === "fulfilled" ? legacyV2DirectResult.value : []) {
-        const prior = directMap.get(address.toLowerCase());
-        directMap.set(address.toLowerCase(), { address, inV1: prior?.inV1 ?? false, inV2: true });
-      }
       for (const address of v3DirectResult.status === "fulfilled" ? v3DirectResult.value : []) {
         const prior = directMap.get(address.toLowerCase());
-        directMap.set(address.toLowerCase(), { address, inV1: prior?.inV1 ?? false, inV2: prior?.inV2 ?? false, inV3: true });
+        directMap.set(address.toLowerCase(), { address, inV1: prior?.inV1 ?? false, inV3: true });
       }
-      const legacyLegsImported = await legacyRegistry.legacyLegsReady(user).catch(() => false);
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v2User, v3User, packageHistorySelfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated, v3LegBusiness, v3Eligible] = await Promise.all([
+        const [v1User, v3User, selfBusiness, legacyCounted, everPackage] = await Promise.all([
           member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
-          member.inV2 ? legacyRegistry.users(member.address).catch(() => null) : null,
           member.inV3 ? registry.users(member.address).catch(() => null) : null,
-          combinedPackageBusiness(member.address, v1Manager, v2Manager).catch(() => 0n),
-          member.inV2 ? legacyRegistry.hasQualifiedPackage(member.address).catch(() => false) : false,
-          member.inV2 ? legacyRegistry.legacyDirectCounted(member.address).catch(() => false) : false,
-          member.inV2 ? legacyRegistry.hasEverPackage(member.address).catch(() => true) : true,
-          member.inV2 ? legacyRegistry.legBusiness(user, member.address).catch(() => 0n) : 0n,
-          member.inV2 ? legacyRegistry.legacyLegBusiness(user, member.address).catch(() => 0n) : 0n,
-          member.inV2 ? legacyRegistry.migrated(member.address).catch(() => false) : false,
-          member.inV3 ? registry.legBusiness(user, member.address).catch(() => 0n) : 0n,
-          member.inV3 ? Promise.all([registry.hasEverPackage(member.address).catch(() => false), registry.legacyDirectCounted(member.address).catch(() => false)]).then(([hasPackage, legacy]) => hasPackage || legacy) : false,
+          combinedPackageBusiness(member.address).catch(() => 0n),
+          member.inV3 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
+          member.inV3 ? registry.hasEverPackage(member.address).catch(() => true) : true,
         ]);
-        const v2TeamBusiness = await v2NewTeamBusiness(member.address, v2User, legacyRegistry);
-        // Package-history getters are absent for some old V2 records. Use
-        // each registry's saved self business as a safe source fallback so
-        // the Direct Business column cannot incorrectly become zero.
-        const historicalSelfBusiness = BigInt(packageHistorySelfBusiness) > 0n
-          ? BigInt(packageHistorySelfBusiness)
-          : BigInt(v2User?.selfDeposit ?? v2User?.[5] ?? v1User?.selfDeposit ?? v1User?.[5] ?? 0n);
-        const v3SelfBusiness = BigInt(v3User?.selfDeposit ?? v3User?.[5] ?? 0n);
-        // Historical self deposits and V3 purchases are separate additions.
-        // The V3 structure migration does not copy package history here.
-        const selfBusiness = historicalSelfBusiness + v3SelfBusiness;
+        // Keep the Reward table byte-for-byte aligned with the Power table:
+        // prioritized package history (V3 > V2 > V1), plus only V3 business
+        // that was created after the legacy level seed.
         const v3TeamBusiness = await v3NewTeamBusiness(member.address, v3User, registry);
         const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
-          + v2TeamBusiness
           + v3TeamBusiness;
         const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
-        const v1Baseline = directMigrated && v1User
-          ? BigInt(v1User.totalTeamDeposit ?? v1User[4] ?? 0n)
-            + BigInt(v1User.selfDeposit ?? v1User[5] ?? 0n)
+        const counted = nextIndex && eligible
+          ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
           : 0n;
-        const v2FormulaBusiness = BigInt(v2LegBusiness)
-          + (legacyLegsImported || BigInt(importedLegacyBusiness) > 0n ? 0n : v1Baseline);
-        // V1 + legacy-V2 is the historical source of truth. V3 is used only
-        // when a direct has no historical record, so an incomplete V3 import
-        // cannot reduce or overwrite the already-qualified business.
-        const business = v2FormulaBusiness > 0n ? v2FormulaBusiness : BigInt(v3LegBusiness);
-        const canCount = v2FormulaBusiness > 0n ? eligible : Boolean(v3Eligible);
-        const counted = nextIndex && canCount
-          ? (business > capPerLeg ? capPerLeg : business)
-          : 0n;
-        return { sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), countedRaw: counted, status: qualified ? "Active package" : eligible ? "Lifetime business counted" : "No own package" };
+        return { sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), countedRaw: counted };
       }));
       const qualifiedBusiness = directRows.reduce((total, row) => total + row.countedRaw, 0n);
       const remaining = requiredBusiness > qualifiedBusiness
@@ -278,11 +206,8 @@ export const Income5 = () => {
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
     { id: "direct", label: "Direct Leg", sortable: true },
-    { id: "selfBusiness", label: "Direct Business", sortable: true },
-    { id: "teamBusiness", label: "Team Business", sortable: true },
-    { id: "business", label: "Leg Business", sortable: true },
-    { id: "counted", label: "Counted for Next Reward", sortable: true },
-    { id: "status", label: "Status", sortable: true },
+    { id: "selfBusiness", label: "Direct Self Business", sortable: true },
+    { id: "teamBusiness", label: "Direct Team Business", sortable: true },
   ];
 
   return (
