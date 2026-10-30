@@ -348,9 +348,12 @@ const DashboardBottom = () => {
           (total, record) => total + BigInt(record.amount ?? 0n),
           0n,
         );
+        // Total Investment must come only from the canonical package list.
+        // Never fall back to Manager aggregates here: those aggregates include
+        // migrated V1/V2 copies and would inflate a V3 user's investment.
         setStats({
           totalEarned: formatUsd(totalEarned + v1Earned),
-          totalInvested: formatUsd(prioritizedInvestment || (BigInt(totalInvested) + visibleV1Investment)),
+          totalInvested: formatUsd(prioritizedInvestment),
           totalWithdrawn: formatUsd(v3Withdrawn + legacyV2Withdrawn + BigInt(v1Withdrawn)),
         });
         setTokenInfo({ symbol: TOKEN_LABEL, balance: formatToken(v2TokenBalanceRaw, Number(v2TokenDecimals) || 18) });
