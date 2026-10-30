@@ -331,20 +331,7 @@ export const Income5 = () => {
       </div>
 
       {message ? <p className="text-danger">{message}</p> : null}
-      <h2 className="mb-3">Direct Leg Business Details</h2>
-      <CustomTable
-        columns={columns}
-        rows={rows}
-        renderRow={(row) => (
-          <>
-            <TableCell align="center">{row.sno}</TableCell>
-            <TableCell align="center">{row.direct}</TableCell>
-            <TableCell align="center">{row.selfBusiness} USDT</TableCell>
-            <TableCell align="center">{row.teamBusiness} USDT</TableCell>
-          </>
-        )}
-      />
-      <h2 className="mb-3 mt-4">Reward Claim History</h2>
+      <h2 className="mb-3">Reward Claim History</h2>
       <CustomTable
         columns={rewardColumns}
         rows={rewardHistoryRows}
@@ -358,6 +345,19 @@ export const Income5 = () => {
             <TableCell align="center">{row.v3Claimed} USDT</TableCell>
             <TableCell align="center">{row.totalClaimed} USDT</TableCell>
             <TableCell align="center">{row.lastClaimAt}</TableCell>
+          </>
+        )}
+      />
+      <h2 className="mb-3">Direct Leg Business Details</h2>
+      <CustomTable
+        columns={columns}
+        rows={rows}
+        renderRow={(row) => (
+          <>
+            <TableCell align="center">{row.sno}</TableCell>
+            <TableCell align="center">{row.direct}</TableCell>
+            <TableCell align="center">{row.selfBusiness} USDT</TableCell>
+            <TableCell align="center">{row.teamBusiness} USDT</TableCell>
           </>
         )}
       />
