@@ -368,7 +368,22 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     // This V3 prefix is a V1-origin migration. Keep it for package history,
     // but mark its lineage so Dashboard capital does not treat it as a new
     // V2/V3 investment.
-    if (v2ImportPosition < 0) return { ...record, legacyV1Mirror: true };
+    if (v2ImportPosition < 0) {
+      const v1Source = v1AlreadyInV3[record.sourceIndex];
+      // Older V3 migration rows retain amount but can have zero ROI display
+      // fields. Restore the immutable V1 package values so Activation cards
+      // keep the correct 3x target and ROI progress without adding a second
+      // V1 row.
+      if (v1Source && v1Source.amount === record.amount) {
+        return {
+          ...record,
+          legacyV1Mirror: true,
+          maximum: record.maximum === 0n ? v1Source.maximum : record.maximum,
+          generated: record.generated === 0n ? v1Source.generated : record.generated,
+        };
+      }
+      return { ...record, legacyV1Mirror: true };
+    }
     if (v2ImportPosition >= migratedV2.length) return record;
     const expected = migratedV2[v2ImportPosition];
     // Source ordering is authoritative.  The amount check is retained as a
