@@ -347,16 +347,7 @@ export const Income4 = () => {
   // that known account; all other accounts retain V3 -> V2 -> V1 priority.
   const v1LevelMatchesEmptyV3 = Boolean(
     v1Power?.forceV1Baseline
-    && Number(v1Power.level) === nativeActiveLevel
     && BigInt(v1Power.claimedCount ?? 0n) > 0n
-    && (() => {
-      const nativeRow = levelDetails.find((item) => Number(item.level) === nativeActiveLevel);
-      return nativeRow
-        && BigInt(nativeRow.releasedCount ?? 0n) === 0n
-        && BigInt(nativeRow.claimedCount ?? 0n) === 0n
-        && BigInt(nativeRow.claimedAmount ?? 0n) === 0n
-        && BigInt(nativeRow.pendingAmount ?? 0n) === 0n;
-    })()
   );
   const v1BaselineAuthoritative = finalizedBaselineMatchesV1 || v1LevelMatchesEmptyV3;
   const visibleLevelDetails = levelDetails;
