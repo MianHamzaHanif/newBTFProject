@@ -68,8 +68,13 @@ export const Income6 = () => {
         const registry = new ethers.Contract(ReferralNetworkAddress, V2ReferralRegistryABI, provider);
         const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, provider);
         const [countRaw, rewardReady, roiDayRaw, legacyBaseline, legacyBaselineCount] = await Promise.all([
-          registry.getAchievedRewardCount(user), incomeLens.getIncomeReady(user, 4), manager.ROI_DAY(),
-          manager.legacyRankBaselineSet(user), manager.legacyRewardBaselineCount(user),
+          registry.getAchievedRewardCount(user).catch(() => 0n),
+          incomeLens.getIncomeReady(user, 4).catch(() => 0n),
+          // Some already-deployed V3 Manager versions predate these optional
+          // getters. Their absence must never erase V1/V2 Reward history.
+          manager.ROI_DAY().catch(() => ROI_DAY_SECONDS),
+          manager.legacyRankBaselineSet(user).catch(() => false),
+          manager.legacyRewardBaselineCount(user).catch(() => 0n),
         ]);
         const roiDaySeconds = BigInt(roiDayRaw || ROI_DAY_SECONDS);
         const count = Number(countRaw);
@@ -80,8 +85,13 @@ export const Income6 = () => {
         const v2Rows = [];
         for (let index = 1; index <= count; index += 1) {
           const [achievedAt, releasedRaw, pending, carried, claimed, claimedCycles, lastClaimAt] = await Promise.all([
-            registry.rewardAchievedAt(user, index), manager.rewardReleasedCount(user, index), manager.pendingRewardIncome(user, index), manager.carriedRewardIncome(user, index),
-            manager.rewardIncomeClaimedByIndex(user, index), manager.rewardInstallmentsClaimedCount(user, index), manager.rewardLastClaimAt(user, index),
+            registry.rewardAchievedAt(user, index).catch(() => 0n),
+            manager.rewardReleasedCount(user, index).catch(() => 0n),
+            manager.pendingRewardIncome(user, index).catch(() => 0n),
+            manager.carriedRewardIncome(user, index).catch(() => 0n),
+            manager.rewardIncomeClaimedByIndex(user, index).catch(() => 0n),
+            manager.rewardInstallmentsClaimedCount(user, index).catch(() => 0n),
+            manager.rewardLastClaimAt(user, index).catch(() => 0n),
           ]);
           let legacySchedule = { set: false, paidInstallments: 0n, originalAchievedAt: 0n, nextInstallmentAt: 0n };
           let legacyPreview = 0n;
