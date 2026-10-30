@@ -228,54 +228,23 @@ const DashboardTop = () => {
       const elapsed = Math.max(0, Number(block.timestamp) - Number(startTime));
       const cycleProgress = Number(roiDay) ? elapsed % Number(roiDay) : 0;
       if (currentPackage > 0n || limit > 0n) {
-        // Match the original dashboard: plan progress is lifetime combined
-        // earnings against the de-duplicated V1+V2+V3 package cap, not only
-        // the current active package.
+        // Plan progress must use the same de-duplicated package rows shown in
+        // Activation.  Each row already carries its source contract's exact
+        // cap and FIFO usage, so old V1/V2 history and V3 imports are counted
+        // once only.  Do not reconstruct this value from income events or
+        // ledger withdrawals: those are payouts, not package-cap usage.
         const combinedIncomeLimit = (packageHistory.records || []).reduce(
           (total, record) => total + BigInt(record.incomeLimit ?? 0n),
           0n,
         );
-        const v1Provider = new ethers.JsonRpcProvider(
-          V1_MAINNET.rpcUrl, V1_MAINNET.chainId, { staticNetwork: true },
+        const combinedIncomeUsed = (packageHistory.records || []).reduce(
+          (total, record) => total + BigInt(record.usedIncome ?? 0n),
+          0n,
         );
-        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
-        const legacyLedger = new ethers.Contract(LegacyV2LedgerAddress, V2IncomeLedgerABI, v2Provider);
-        const [
-          v1Net, v1Wallet, feeBP, legacyIncomeLength, readyAmounts,
-          v3SelfRoiGenerated, legacySelfRoiGenerated,
-        ] = await Promise.all([
-          v1Manager.totalIncomeWithdrawnToken(wallet),
-          v1Manager.incomeWalletToken(wallet),
-          v1Manager.withdrawFeeBP(),
-          legacyLedger.getUserIncomeHistoryLength(wallet),
-          Promise.all(Array.from({ length: 5 }, (_, incomeType) => v2Lens.getIncomeReady(wallet, incomeType).catch(() => 0n))),
-          v2Manager.selfRoiGenerated(wallet).catch(() => 0n),
-          legacyManager.selfRoiGenerated(wallet).catch(() => 0n),
-        ]);
-        let legacyClaimed = 0n;
-        const historyLength = Number(legacyIncomeLength ?? 0n);
-        for (let start = 0; start < historyLength; start += 10) {
-          const batch = Array.from({ length: Math.min(10, historyLength - start) }, (_, offset) => start + offset);
-          const entries = await Promise.all(batch.map((index) => legacyLedger.getUserIncomeHistoryAt(wallet, index)));
-          legacyClaimed += entries.reduce((total, entry) => total + BigInt(entry.amount ?? entry[2] ?? 0n), 0n);
-        }
-        const v1FeeBP = BigInt(feeBP ?? 0n);
-        const v1Gross = BigInt(v1Net) + (v1FeeBP < 10_000n
-          ? (BigInt(v1Net) * v1FeeBP) / (10_000n - v1FeeBP)
-          : 0n) + BigInt(v1Wallet);
-        const readyIncome = readyAmounts.reduce((total, amount) => total + BigInt(amount ?? 0n), 0n);
-        // A migrated package's V2 baseline is already in `legacyClaimed`.
-        // Only the additional ROI accrued after the V3 migration belongs in
-        // this dashboard total; adding the complete V3 generated value would
-        // count the V2 baseline twice.
-        const postMigrationSelfRoi = BigInt(v3SelfRoiGenerated ?? 0n) > BigInt(legacySelfRoiGenerated ?? 0n)
-          ? BigInt(v3SelfRoiGenerated) - BigInt(legacySelfRoiGenerated)
-          : 0n;
-        const combinedEarned = v1Gross + legacyClaimed + readyIncome + postMigrationSelfRoi;
         const displayLimit = combinedIncomeLimit > 0n ? combinedIncomeLimit : BigInt(limit);
-        const cappedEarned = combinedEarned > displayLimit ? displayLimit : combinedEarned;
+        const cappedUsed = combinedIncomeUsed > displayLimit ? displayLimit : combinedIncomeUsed;
         setPlanActivity({
-          progressText: displayLimit > 0n ? `${toPercent2(cappedEarned, displayLimit)}% / 100%` : "0% / 100%",
+          progressText: displayLimit > 0n ? `${toPercent2(cappedUsed, displayLimit)}% / 100%` : "0% / 100%",
           activeStakeLabel: `Combined income limit: ${formatEther2(displayLimit)} USDT`,
           selfRoiReadyLabel: `Current Self ROI Ready: ${formatEther2(selfReady)} ${SettlementTokenSymbol}`,
           remainingSeconds: Number(roiDay) ? Number(roiDay) - cycleProgress : 0,

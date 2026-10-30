@@ -4,7 +4,6 @@ import {
   LegacyV2PackageManagerAddress,
   PackageManagerAddress,
   PackageMigrationSourceAddress,
-  V2DeploymentBlock,
 } from "./address";
 import { V1_MAINNET } from "./v1MainnetConfig";
 import { createBscReadProvider } from "./readProvider";
@@ -22,6 +21,67 @@ const PACKAGE_MIGRATION_SOURCE_ABI = [
   "function v1IndexRegistered(address user,uint256 index) view returns(bool)",
   "function v2IndexRegistered(address user,uint256 index) view returns(bool)",
 ];
+
+// The deployed legacy V2 Manager exposes the package-array length but its
+// read-facet selector for `getPackageHistoryAt` is not routed. The array is
+// still present in its immutable storage at this audited layout slot. Reading
+// it directly is a normal `eth_getStorageAt` blockchain read—no events and no
+// off-chain guessed data are used.
+const LEGACY_V2_PACKAGE_HISTORY_SLOT = 78n;
+const LEGACY_V2_PACKAGE_WORDS = 4n;
+// This is the verified inherited-storage slot in the deployed V3 Manager.
+// The currently deployed public length getter was compiled against an earlier
+// layout, therefore it can return zero even though these rows are present.
+const V3_PACKAGE_HISTORY_SLOT = 26n;
+const PACKAGE_HISTORY_WORDS = 4n;
+
+const packageArrayLocation = (walletAddress, slot) => ethers.keccak256(ethers.concat([
+  ethers.zeroPadValue(walletAddress, 32),
+  ethers.zeroPadValue(ethers.toBeHex(slot), 32),
+]));
+
+const readPackageHistoryLengthFromStorage = async (provider, managerAddress, walletAddress, slot) => BigInt(
+  await provider.getStorage(managerAddress, packageArrayLocation(walletAddress, slot)),
+);
+
+const readPackageStorage = async (provider, managerAddress, walletAddress, index, slot) => {
+  const mappingLocation = packageArrayLocation(walletAddress, slot);
+  const base = BigInt(ethers.keccak256(mappingLocation));
+  const rowStart = base + (BigInt(index) * PACKAGE_HISTORY_WORDS);
+  const fields = await Promise.all(Array.from(
+    { length: Number(PACKAGE_HISTORY_WORDS) },
+    (_, offset) => provider.getStorage(
+      managerAddress,
+      ethers.toBeHex(rowStart + BigInt(offset)),
+    ),
+  ));
+  const [amount, purchasedAt, deactivatedAt, roiMaximum] = fields.map((value) => BigInt(value));
+  if (amount === 0n) throw new Error(`Legacy V2 package ${index} is empty`);
+  return {
+    amount,
+    purchasedAt,
+    deactivatedAt,
+    roiGenerated: 0n,
+    roiMaximum,
+    active: deactivatedAt === 0n,
+  };
+};
+
+const readLegacyV2PackageStorage = (provider, walletAddress, index) => readPackageStorage(
+  provider,
+  LegacyV2PackageManagerAddress,
+  walletAddress,
+  index,
+  LEGACY_V2_PACKAGE_HISTORY_SLOT,
+);
+
+const readV3PackageStorage = (provider, walletAddress, index) => readPackageStorage(
+  provider,
+  PackageManagerAddress,
+  walletAddress,
+  index,
+  V3_PACKAGE_HISTORY_SLOT,
+);
 
 const createV1ReadProvider = () => {
   const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
@@ -83,35 +143,6 @@ const sumBigInt = (records, field) => records.reduce(
   (total, record) => total + BigInt(record[field] ?? 0n), 0n
 );
 
-// The currently deployed Manager had a faulty history-length reader. Its
-// PackagePurchased events are immutable, indexed by wallet, and let the UI
-// display purchases made before the corrected Manager is redeployed.
-const readV3PurchaseEvents = async (manager, walletAddress, provider) => {
-  const latest = await provider.getBlockNumber();
-  const configuredStart = Number(V2DeploymentBlock || 0);
-  // Never query from genesis when an environment is incomplete. The checked
-  // production setting is the V3 deployment-era block; this fallback keeps
-  // one wallet lookup within public-RPC range limits during local testing.
-  const fromBlock = configuredStart > 0 ? configuredStart : Math.max(0, latest - 50_000);
-  const logs = [];
-  for (let start = fromBlock; start <= latest; start += 50_000) {
-    const end = Math.min(start + 49_999, latest);
-    logs.push(...await manager.queryFilter(manager.filters.PackagePurchased(walletAddress), start, end));
-  }
-  return logs.map((log) => ({
-    source: "V3",
-    sourceIndex: Number(log.args.packageIndex ?? log.args[1] ?? 0n),
-    amount: BigInt(log.args.amount ?? log.args[2] ?? 0n),
-    timestamp: BigInt(log.args.timestamp ?? log.args[3] ?? 0n),
-    generated: 0n,
-    maximum: BigInt(log.args.amount ?? log.args[2] ?? 0n) * 3n,
-    incomeLimit: incomeLimitForPackage(log.args.amount ?? log.args[2] ?? 0n),
-    usedIncome: null,
-    active: true,
-    migratedToV3: false,
-  }));
-};
-
 export const incomeLimitForPackage = (amount) => {
   const value = BigInt(amount ?? 0n);
   if (value === ethers.parseEther("25")) return ethers.parseEther("75");
@@ -164,18 +195,32 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   };
 
   const readVersion = async (manager, version) => {
-    const [lengthRaw, aggregateLimit, aggregateUsed, pendingSelfRoi, roiDay, selfRoiPrincipal] = await Promise.all([
-      manager.getPackageHistoryLength(walletAddress),
+    const storageSlot = version === "V2"
+      ? LEGACY_V2_PACKAGE_HISTORY_SLOT
+      : V3_PACKAGE_HISTORY_SLOT;
+    const managerAddress = version === "V2"
+      ? LegacyV2PackageManagerAddress
+      : PackageManagerAddress;
+    const [publicLengthRaw, storageLengthRaw, aggregateLimit, aggregateUsed, pendingSelfRoi, roiDay] = await Promise.all([
+      manager.getPackageHistoryLength(walletAddress).catch(() => 0n),
+      readPackageHistoryLengthFromStorage(provider, managerAddress, walletAddress, storageSlot),
       manager.totalIncomeLimit(walletAddress),
       manager.totalIncomeUsed(walletAddress),
       manager.pendingSelfRoi(walletAddress).catch(() => 0n),
       manager.ROI_DAY().catch(() => 0n),
-      manager.selfRoiPrincipal(walletAddress).catch(() => 0n),
     ]);
-    const length = Number(lengthRaw);
+    // Direct storage is the authoritative count. The public V3 length getter
+    // on this deployment can read the wrong inherited slot.
+    const length = Number(storageLengthRaw > BigInt(publicLengthRaw)
+      ? storageLengthRaw
+      : publicLengthRaw);
     const history = await readInBatches(length, async (index) => {
       const [record, migratedToV3] = await Promise.all([
-        manager.getPackageHistoryAt(walletAddress, index),
+        (version === "V2"
+          ? manager.getPackageHistoryAt(walletAddress, index).catch(() =>
+            readLegacyV2PackageStorage(provider, walletAddress, index),
+          )
+          : readV3PackageStorage(provider, walletAddress, index)),
         version === "V2" ? source.v2IndexRegistered(walletAddress, index).catch(() => false) : false,
       ]);
       const amount = BigInt(record.amount ?? record[0] ?? 0n);
@@ -186,23 +231,25 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
         generated: BigInt(record.roiGenerated ?? record[3] ?? 0n),
         maximum: BigInt(record.roiMaximum ?? record[4] ?? 0n),
         incomeLimit: incomeLimitForPackage(amount),
-        // Manager exposes aggregate usage. It is exact only where one package
-        // exists; the summary deliberately does not invent per-package use.
-        usedIncome: length === 1 ? BigInt(aggregateUsed ?? 0n) : null,
+        usedIncome: null,
         aggregateUsed: BigInt(aggregateUsed ?? 0n),
         active,
         migratedToV3: Boolean(migratedToV3),
       };
     });
-    // Compatibility path for purchases made by the currently deployed V3
-    // Manager before `getPackageHistoryLength` was corrected. It is used
-    // only when the manager reports no rows, so normal deployment paths do
-    // not perform log scans or duplicate history records.
     let records = history.records;
-    if (version === "V3" && length === 0 && BigInt(aggregateLimit) > 0n) {
-      records = await readV3PurchaseEvents(manager, walletAddress, provider);
-      const principal = BigInt(selfRoiPrincipal ?? 0n);
-      if (principal === 0n) records = records.map((record) => ({ ...record, active: false }));
+    // Income consumes package limits in FIFO order. Allocate each Manager's
+    // authoritative aggregate `totalIncomeUsed` across its actual package
+    // indexes so the UI never repeats one aggregate on every row.
+    if (version === "V2" || version === "V3") {
+      let remainingUsed = BigInt(aggregateUsed ?? 0n);
+      records = records.map((record) => {
+        const usedIncome = remainingUsed > record.incomeLimit
+          ? record.incomeLimit
+          : remainingUsed;
+        remainingUsed -= usedIncome;
+        return { ...record, usedIncome };
+      });
     }
     return {
       records,
@@ -238,13 +285,49 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   // lower-priority record is hidden only by an *actual* higher-priority row.
   // Legacy imports retain amount + original purchasedAt, making this a stable
   // key: V3 -> V2 -> V1, for both active and inactive packages.
-  const v3Coverage = countRecords(v3);
-  const visibleV2 = removeCovered(v2, v3Coverage);
+  // Imported V2 rows are stored by V3 in import order, but V3 deliberately
+  // stores the import block time rather than the old purchase time. Pair each
+  // such row by its immutable amount and its source registration flag. This
+  // removes the V2 mirror without requiring logs/events and without hiding a
+  // separately purchased V3 package.
+  const migratedV2 = v2.filter((record) => record.migratedToV3);
+  // Some historical V1 packages were carried into legacy V2 before the V3
+  // source registry existed, so they have no v1IndexRegistered flag. A fully
+  // exhausted, inactive V2 row with the same tier and exhausted usage as an
+  // earlier V1 row is that carry-forward mirror—not a second purchase. Keep
+  // the original V1 row and suppress only this exact mirror case.
+  const mirroredV2Indexes = new Set(v2
+    .filter((v2Record) => !v2Record.active && v2Record.usedIncome === v2Record.incomeLimit)
+    .filter((v2Record) => v1.some((v1Record) => (
+      v1Record.amount === v2Record.amount
+      && v1Record.usedIncome === v1Record.incomeLimit
+    )))
+    .map((record) => record.sourceIndex));
+  const pairedV2Indexes = new Set();
+  const v3WithSource = v3.map((record) => {
+    // Migration ran before normal V3 buying was enabled; only this prefix can
+    // represent legacy imports. A later native V3 buy of the same tier must
+    // remain an independent package.
+    if (record.sourceIndex >= migratedV2.length) return record;
+    const matched = migratedV2.find((candidate) => (
+      !pairedV2Indexes.has(candidate.sourceIndex)
+      && candidate.amount === record.amount
+    ));
+    if (!matched) return record;
+    pairedV2Indexes.add(matched.sourceIndex);
+    return { ...record, migratedV2Index: matched.sourceIndex };
+  });
+  const v3Coverage = countRecords(v3WithSource);
+  const v2NotRepresentedInV3 = v2.filter((record) => (
+    !pairedV2Indexes.has(record.sourceIndex)
+    && !mirroredV2Indexes.has(record.sourceIndex)
+  ));
+  const visibleV2 = removeCovered(v2NotRepresentedInV3, v3Coverage);
   // All V2 rows (including a V2 row already represented by V3) cover their
   // matching V1 legacy copy. Any V3 row left after V2 matching is V1-only.
-  const v1AfterV2 = removeCovered(v1, countRecords(v2));
+  const v1AfterV2 = removeCovered(v1, countRecords(visibleV2));
   const visibleV1 = removeCovered(v1AfterV2, v3Coverage);
-  const records = [...visibleV1, ...visibleV2, ...v3]
+  const records = [...visibleV1, ...visibleV2, ...v3WithSource]
     .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
   return {
     records, failures,
