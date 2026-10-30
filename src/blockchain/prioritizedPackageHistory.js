@@ -355,15 +355,24 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     )))
   ));
   const pairedV2Indexes = new Set();
+  // Legacy imports are written into V3 in migration order: first any V1
+  // source rows, then the registered V2 rows.  The old code started pairing
+  // V2 at V3 row zero, which shifted every pair whenever a V1 row existed
+  // (and could display an already-imported V2 100 package twice).
+  const v1ImportPrefixLength = v1AlreadyInV3.length;
   const v3WithSource = v3.map((record) => {
     // Migration ran before normal V3 buying was enabled; only this prefix can
     // represent legacy imports. A later native V3 buy of the same tier must
     // remain an independent package.
-    if (record.sourceIndex >= migratedV2.length) return record;
-    const matched = migratedV2.find((candidate) => (
-      !pairedV2Indexes.has(candidate.sourceIndex)
-      && candidate.amount === record.amount
-    ));
+    const v2ImportPosition = record.sourceIndex - v1ImportPrefixLength;
+    if (v2ImportPosition < 0 || v2ImportPosition >= migratedV2.length) return record;
+    const expected = migratedV2[v2ImportPosition];
+    // Source ordering is authoritative.  The amount check is retained as a
+    // safety guard so a later native V3 buy is never paired with legacy data.
+    const matched = expected && !pairedV2Indexes.has(expected.sourceIndex)
+      && expected.amount === record.amount
+      ? expected
+      : null;
     if (!matched) return record;
     pairedV2Indexes.add(matched.sourceIndex);
     // The deployed V3 migration preserves the package/cap state, but older
