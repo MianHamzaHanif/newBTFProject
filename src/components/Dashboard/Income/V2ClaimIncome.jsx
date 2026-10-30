@@ -113,19 +113,26 @@ export default function V2ClaimIncome() {
           let currentAmount = 0n;
           let claimedAmount = 0n;
 
-          try {
-            // Strictly V3-ready income. V1/V2 checkpoint previews are not
-            // combined here; users claim only against the V3 deployment.
-            currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
-          } catch {
-            // The deployed lens can revert for a Level ROI preview even
-            // though the Manager can settle and pay that same amount. A
-            // static call executes the identical claim calculation without
-            // changing blockchain state, so it is the accurate fallback.
+          if (action.incomeType === 1 || action.incomeType === 2) {
+            // Self/Level ROI are settled lazily by their claim methods.  The
+            // old lens can return a stale partial amount (or revert for Level
+            // ROI), so always simulate the exact V3 claim transaction.
             try {
               currentAmount = await packageManager[action.method].staticCall({ from: wallet });
             } catch {
               currentAmount = 0n;
+            }
+          } else {
+            try {
+              // Strictly V3-ready income. V1/V2 checkpoint previews are not
+              // combined here; users claim only against the V3 deployment.
+              currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
+            } catch {
+              try {
+                currentAmount = await packageManager[action.method].staticCall({ from: wallet });
+              } catch {
+                currentAmount = 0n;
+              }
             }
           }
           if (
