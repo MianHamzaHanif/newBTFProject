@@ -365,7 +365,11 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     // represent legacy imports. A later native V3 buy of the same tier must
     // remain an independent package.
     const v2ImportPosition = record.sourceIndex - v1ImportPrefixLength;
-    if (v2ImportPosition < 0 || v2ImportPosition >= migratedV2.length) return record;
+    // This V3 prefix is a V1-origin migration. Keep it for package history,
+    // but mark its lineage so Dashboard capital does not treat it as a new
+    // V2/V3 investment.
+    if (v2ImportPosition < 0) return { ...record, legacyV1Mirror: true };
+    if (v2ImportPosition >= migratedV2.length) return record;
     const expected = migratedV2[v2ImportPosition];
     // Source ordering is authoritative.  The amount check is retained as a
     // safety guard so a later native V3 buy is never paired with legacy data.
@@ -382,6 +386,7 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     return {
       ...record,
       migratedV2Index: matched.sourceIndex,
+      legacyV1Mirror: Boolean(matched.legacyV1Mirror),
       maximum: record.maximum === 0n ? matched.maximum : record.maximum,
       generated: record.maximum === 0n ? matched.generated : record.generated,
     };
