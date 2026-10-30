@@ -148,9 +148,10 @@ export const Income5 = () => {
       }
       const legacyLegsImported = await legacyRegistry.legacyLegsReady(user).catch(() => false);
       const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v2User, selfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated, v3LegBusiness, v3Eligible] = await Promise.all([
+        const [v1User, v2User, v3User, packageHistorySelfBusiness, qualified, legacyCounted, everPackage, v2LegBusiness, importedLegacyBusiness, directMigrated, v3LegBusiness, v3Eligible] = await Promise.all([
           member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
           member.inV2 ? legacyRegistry.users(member.address).catch(() => null) : null,
+          member.inV3 ? registry.users(member.address).catch(() => null) : null,
           combinedPackageBusiness(member.address, v1Manager, v2Manager).catch(() => 0n),
           member.inV2 ? legacyRegistry.hasQualifiedPackage(member.address).catch(() => false) : false,
           member.inV2 ? legacyRegistry.legacyDirectCounted(member.address).catch(() => false) : false,
@@ -162,6 +163,15 @@ export const Income5 = () => {
           member.inV3 ? Promise.all([registry.hasEverPackage(member.address).catch(() => false), registry.legacyDirectCounted(member.address).catch(() => false)]).then(([hasPackage, legacy]) => hasPackage || legacy) : false,
         ]);
         const v2TeamBusiness = await v2NewTeamBusiness(member.address, v2User, legacyRegistry);
+        // Package-history getters are absent for some old V2 records. Use
+        // each registry's saved self business as a safe source fallback so
+        // the Direct Business column cannot incorrectly become zero.
+        const historicalSelfBusiness = BigInt(packageHistorySelfBusiness) > 0n
+          ? BigInt(packageHistorySelfBusiness)
+          : BigInt(v2User?.selfDeposit ?? v2User?.[5] ?? v1User?.selfDeposit ?? v1User?.[5] ?? 0n);
+        const selfBusiness = BigInt(v3User?.selfDeposit ?? v3User?.[5] ?? 0n) > 0n
+          ? BigInt(v3User.selfDeposit ?? v3User[5])
+          : historicalSelfBusiness;
         const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v2TeamBusiness;
         const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
