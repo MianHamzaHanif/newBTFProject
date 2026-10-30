@@ -244,9 +244,6 @@ export const Income5 = () => {
             <TableCell align="center">{row.direct}</TableCell>
             <TableCell align="center">{row.selfBusiness} USDT</TableCell>
             <TableCell align="center">{row.teamBusiness} USDT</TableCell>
-            <TableCell align="center">{row.business} USDT</TableCell>
-            <TableCell align="center">{row.counted} USDT</TableCell>
-            <TableCell align="center">{row.status}</TableCell>
           </>
         )}
       />
