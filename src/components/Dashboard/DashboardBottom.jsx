@@ -344,20 +344,10 @@ const DashboardBottom = () => {
         // Package history has one canonical source per package index:
         // V3 first, then legacy V2, then V1. It prevents a migrated package
         // from appearing twice in Total Invested.
-        const canonicalPackages = prioritizedPackages.records || [];
-        // When a user has native V2/V3 package activity, V1-origin bridge
-        // rows are history only.  Counting them as capital again inflates
-        // Total Investment (for example, a 100+25+100 native V2 lineage was
-        // displayed as 300 by adding old V1 bridge copies).  V1-only users
-        // keep their V1 total unchanged.
-        const hasNativeV2OrV3Package = canonicalPackages.some((record) => (
-          (record.source === "V2" || record.source === "V3") && !record.legacyV1Mirror
-        ));
-        const prioritizedInvestment = canonicalPackages
-          .filter((record) => !hasNativeV2OrV3Package || (
-            record.source !== "V1" && !record.legacyV1Mirror
-          ))
-          .reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
+        const prioritizedInvestment = (prioritizedPackages.records || []).reduce(
+          (total, record) => total + BigInt(record.amount ?? 0n),
+          0n,
+        );
         // Total Investment must come only from the canonical package list.
         // Never fall back to Manager aggregates here: those aggregates include
         // migrated V1/V2 copies and would inflate a V3 user's investment.
