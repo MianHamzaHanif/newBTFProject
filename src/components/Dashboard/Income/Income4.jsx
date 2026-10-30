@@ -469,7 +469,9 @@ export const Income4 = () => {
       claimedAmount: "-",
       lastClaimAt: "V2 migrated schedule",
     }] : []),
-    ...(showV1Power && !fallbackHistoryRows.some((item) => item.level === `P${v1Power.level}`) ? [{
+    ...(showV1Power
+      && !v2HistoryRows.some((item) => item.level === `P${v1Power.level}`)
+      && !fallbackHistoryRows.some((item) => item.level === `P${v1Power.level}`) ? [{
       level: `P${v1Power.level}`,
       activatedAt: formatTime(v1Power.activatedAt),
       releasedCount: `${finalizedBaselineMatchesV1 ? displayedReleasedCount : v1Power.claimedCount} / 20`,
