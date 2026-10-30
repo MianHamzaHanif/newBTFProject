@@ -47,6 +47,8 @@ const V1_POWER_MODULE_ABI = [
   "function powerLevelStartedAt(address) view returns(uint256)",
   "function powerClaimedCount(address) view returns(uint256)",
   "function rawClaimable(address) view returns(uint256)",
+  "function getPowerCycleHistoryLength(address) view returns(uint256)",
+  "function getPowerCycleHistoryAt(address,uint256) view returns(uint256 level,uint256 claimedCount,uint256 startedAt,uint256 endedAt)",
 ];
 const POWER_LEG_CAP_BPS = 4000n;
 const BASIS_POINTS = 10000n;
@@ -206,6 +208,23 @@ export const Income4 = () => {
       const v1History = await Promise.all(
         Array.from({ length: v1HistoryLength }, (_, index) => v1Manager.getPowerHistoryAt(user, index)),
       );
+      // `getPowerHistoryAt` carries a payout/next-payout timestamp, not a
+      // rank-achievement timestamp. The Power module's cycle history is the
+      // authoritative source for each rank's actual started/achieved time.
+      const v1CycleHistoryLength = Number(await v1PowerModule.getPowerCycleHistoryLength(user));
+      const v1CycleHistory = await Promise.all(
+        Array.from({ length: v1CycleHistoryLength }, (_, index) =>
+          v1PowerModule.getPowerCycleHistoryAt(user, index),
+        ),
+      );
+      const v1ActivatedAtByLevel = {};
+      for (const cycle of v1CycleHistory) {
+        const level = Number(cycle.level ?? cycle[0] ?? 0n);
+        if (level) v1ActivatedAtByLevel[level] = BigInt(cycle.startedAt ?? cycle[2] ?? 0n);
+      }
+      if (BigInt(v1Level) > 0n) {
+        v1ActivatedAtByLevel[Number(v1Level)] = BigInt(v1ActivatedAt);
+      }
 
       // Claimed amounts are payment facts, not schedule previews. Aggregate
       // every real V1/V2/V3 claim record by P-level so a migrated counter or
@@ -224,6 +243,11 @@ export const Income4 = () => {
       };
       for (const row of v1History) {
         addPaid(row.powerLevel ?? row[5], row.claimedAmount ?? row[4], row.timestamp ?? row[6]);
+      }
+      for (const [level, activatedAt] of Object.entries(v1ActivatedAtByLevel)) {
+        if (fallbackByLevel[level]) {
+          fallbackByLevel[level] = { ...fallbackByLevel[level], activatedAt };
+        }
       }
       for (const row of legacyIncomeHistory) {
         if (Number(row.incomeType ?? row[0] ?? 0n) === 3) {
