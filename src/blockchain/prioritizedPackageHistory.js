@@ -29,6 +29,8 @@ const PACKAGE_MIGRATION_SOURCE_ABI = [
 // off-chain guessed data are used.
 const LEGACY_V2_PACKAGE_HISTORY_SLOT = 78n;
 const LEGACY_V2_PACKAGE_WORDS = 4n;
+const LEGACY_V2_ORIGINAL_PURCHASED_AT_SLOT = 79n;
+const LEGACY_V2_IS_LEGACY_PACKAGE_SLOT = 82n;
 // This is the verified inherited-storage slot in the deployed V3 Manager.
 // The currently deployed public length getter was compiled against an earlier
 // layout, therefore it can return zero even though these rows are present.
@@ -43,6 +45,25 @@ const packageArrayLocation = (walletAddress, slot) => ethers.keccak256(ethers.co
 const readPackageHistoryLengthFromStorage = async (provider, managerAddress, walletAddress, slot) => BigInt(
   await provider.getStorage(managerAddress, packageArrayLocation(walletAddress, slot)),
 );
+
+const nestedMappingLocation = (walletAddress, slot, index) => ethers.keccak256(ethers.concat([
+  ethers.zeroPadValue(ethers.toBeHex(BigInt(index)), 32),
+  ethers.zeroPadValue(packageArrayLocation(walletAddress, slot), 32),
+]));
+
+const readLegacyV2PackageMeta = async (provider, walletAddress, index) => {
+  const [originalPurchasedAt, isLegacy] = await Promise.all([
+    provider.getStorage(
+      LegacyV2PackageManagerAddress,
+      nestedMappingLocation(walletAddress, LEGACY_V2_ORIGINAL_PURCHASED_AT_SLOT, index),
+    ),
+    provider.getStorage(
+      LegacyV2PackageManagerAddress,
+      nestedMappingLocation(walletAddress, LEGACY_V2_IS_LEGACY_PACKAGE_SLOT, index),
+    ),
+  ]);
+  return { originalPurchasedAt: BigInt(originalPurchasedAt), isLegacy: BigInt(isLegacy) !== 0n };
+};
 
 const readPackageStorage = async (provider, managerAddress, walletAddress, index, slot) => {
   const mappingLocation = packageArrayLocation(walletAddress, slot);
@@ -67,13 +88,27 @@ const readPackageStorage = async (provider, managerAddress, walletAddress, index
   };
 };
 
-const readLegacyV2PackageStorage = (provider, walletAddress, index) => readPackageStorage(
-  provider,
-  LegacyV2PackageManagerAddress,
-  walletAddress,
-  index,
-  LEGACY_V2_PACKAGE_HISTORY_SLOT,
-);
+const readLegacyV2PackageStorage = async (provider, walletAddress, index) => {
+  const [record, meta] = await Promise.all([
+    readPackageStorage(
+      provider,
+      LegacyV2PackageManagerAddress,
+      walletAddress,
+      index,
+      LEGACY_V2_PACKAGE_HISTORY_SLOT,
+    ),
+    readLegacyV2PackageMeta(provider, walletAddress, index),
+  ]);
+  // A legacy V2 row retains its immutable V1 purchase time. This is the
+  // exact on-chain V1→V2 identity link and is safer than matching tiers.
+  return {
+    ...record,
+    purchasedAt: meta.isLegacy && meta.originalPurchasedAt !== 0n
+      ? meta.originalPurchasedAt
+      : record.purchasedAt,
+    legacyV1Mirror: meta.isLegacy,
+  };
+};
 
 const readV3PackageStorage = (provider, walletAddress, index) => readPackageStorage(
   provider,
@@ -291,18 +326,6 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   // removes the V2 mirror without requiring logs/events and without hiding a
   // separately purchased V3 package.
   const migratedV2 = v2.filter((record) => record.migratedToV3);
-  // Some historical V1 packages were carried into legacy V2 before the V3
-  // source registry existed, so they have no v1IndexRegistered flag. A fully
-  // exhausted, inactive V2 row with the same tier and exhausted usage as an
-  // earlier V1 row is that carry-forward mirror—not a second purchase. Keep
-  // the original V1 row and suppress only this exact mirror case.
-  const mirroredV2Indexes = new Set(v2
-    .filter((v2Record) => !v2Record.active && v2Record.usedIncome === v2Record.incomeLimit)
-    .filter((v2Record) => v1.some((v1Record) => (
-      v1Record.amount === v2Record.amount
-      && v1Record.usedIncome === v1Record.incomeLimit
-    )))
-    .map((record) => record.sourceIndex));
   const pairedV2Indexes = new Set();
   const v3WithSource = v3.map((record) => {
     // Migration ran before normal V3 buying was enabled; only this prefix can
@@ -320,7 +343,6 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   const v3Coverage = countRecords(v3WithSource);
   const v2NotRepresentedInV3 = v2.filter((record) => (
     !pairedV2Indexes.has(record.sourceIndex)
-    && !mirroredV2Indexes.has(record.sourceIndex)
   ));
   const visibleV2 = removeCovered(v2NotRepresentedInV3, v3Coverage);
   // All V2 rows (including a V2 row already represented by V3) cover their
