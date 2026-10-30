@@ -72,6 +72,19 @@ const v2NewTeamBusiness = async (address, v2User, registry) => {
   return v2Total > seededV1Business ? v2Total - seededV1Business : 0n;
 };
 
+// V3's total can contain the imported legacy level seed. Only the portion
+// above that seed is new V3 team business and may be added to V1 + V2.
+const v3NewTeamBusiness = async (address, v3User, registry) => {
+  const v3Total = BigInt(v3User?.totalTeamDeposit ?? v3User?.[4] ?? 0n);
+  if (!v3User || v3Total === 0n) return 0n;
+  const importedLegacyBusiness = (await Promise.all(
+    Array.from({ length: 15 }, (_, level) =>
+      registry.legacyLevelRemaining(address, level).catch(() => 0n),
+    ),
+  )).reduce((total, amount) => total + BigInt(amount), 0n);
+  return v3Total > importedLegacyBusiness ? v3Total - importedLegacyBusiness : 0n;
+};
+
 async function ensureBscMainnet() {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
   if (BigInt(chainId) === BigInt(WALLET_ADD_CHAIN_PARAMS.chainId)) return;
@@ -169,10 +182,14 @@ export const Income5 = () => {
         const historicalSelfBusiness = BigInt(packageHistorySelfBusiness) > 0n
           ? BigInt(packageHistorySelfBusiness)
           : BigInt(v2User?.selfDeposit ?? v2User?.[5] ?? v1User?.selfDeposit ?? v1User?.[5] ?? 0n);
-        const selfBusiness = BigInt(v3User?.selfDeposit ?? v3User?.[5] ?? 0n) > 0n
-          ? BigInt(v3User.selfDeposit ?? v3User[5])
-          : historicalSelfBusiness;
-        const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v2TeamBusiness;
+        const v3SelfBusiness = BigInt(v3User?.selfDeposit ?? v3User?.[5] ?? 0n);
+        // Historical self deposits and V3 purchases are separate additions.
+        // The V3 structure migration does not copy package history here.
+        const selfBusiness = historicalSelfBusiness + v3SelfBusiness;
+        const v3TeamBusiness = await v3NewTeamBusiness(member.address, v3User, registry);
+        const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
+          + v2TeamBusiness
+          + v3TeamBusiness;
         const legBusiness = BigInt(selfBusiness) + teamBusiness;
         const eligible = legacyCounted || everPackage;
         const v1Baseline = directMigrated && v1User
