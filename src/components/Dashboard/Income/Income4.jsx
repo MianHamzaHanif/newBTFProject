@@ -5,7 +5,8 @@ import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
-import { IncomeReadyLensAddress, LegacyV2PackageManagerAddress, LegacyV2RegistryAddress, PackageManagerAddress, ReferralNetworkAddress, V2LedgerAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
+import LegacyV2IncomeLedgerABI from "../../../blockchain/legacyV2IncomeLedgerABI";
+import { IncomeReadyLensAddress, LegacyV2LedgerAddress, LegacyV2PackageManagerAddress, LegacyV2RegistryAddress, PackageManagerAddress, ReferralNetworkAddress, V2LedgerAddress, V2LegacyRankCheckpointAddress } from "../../../blockchain/address";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import {
   createBscReadProvider,
@@ -82,6 +83,7 @@ export const Income4 = () => {
   const [v1Power, setV1Power] = useState(null);
   const [powerRecovery, setPowerRecovery] = useState(null);
   const [legacyPowerLevels, setLegacyPowerLevels] = useState({});
+  const [claimedPowerByLevel, setClaimedPowerByLevel] = useState({});
   const [nextPowerProgress, setNextPowerProgress] = useState({ level: 0, required: 0n, qualified: 0n });
 
   const loadPowerDetails = useCallback(async () => {
@@ -115,15 +117,24 @@ export const Income4 = () => {
       );
       const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, provider);
       const checkpoint = new ethers.Contract(V2LegacyRankCheckpointAddress, RANK_CHECKPOINT_READ_ABI, provider);
-      const [registryAchievedPowerRaw, powerHistoryLengthRaw] = await Promise.all([
+      const legacyLedger = new ethers.Contract(LegacyV2LedgerAddress, LegacyV2IncomeLedgerABI, provider);
+      const [registryAchievedPowerRaw, powerHistoryLengthRaw, legacyIncomeHistoryLengthRaw] = await Promise.all([
         registry.getAchievedPowerLevel(user),
         ledger.getUserIncomeHistoryLengthByType(user, 3),
+        legacyLedger.getUserIncomeHistoryLength(user).catch(() => 0n),
       ]);
-      const powerHistory = await Promise.all(
+      const [powerHistory, legacyIncomeHistory] = await Promise.all([
+        Promise.all(
         Array.from({ length: Number(powerHistoryLengthRaw) }, (_, index) =>
           ledger.getUserIncomeHistoryAtByType(user, 3, index),
         ),
-      );
+        ),
+        Promise.all(
+          Array.from({ length: Number(legacyIncomeHistoryLengthRaw) }, (_, index) =>
+            legacyLedger.getUserIncomeHistoryAt(user, index),
+          ),
+        ),
+      ]);
       // The ledger stores Power claims with their P-level. Keep the most
       // recent timestamp per level instead of incorrectly showing the one
       // global Manager timestamp in every P1/P2/P3 row.
@@ -195,6 +206,33 @@ export const Income4 = () => {
       const v1History = await Promise.all(
         Array.from({ length: v1HistoryLength }, (_, index) => v1Manager.getPowerHistoryAt(user, index)),
       );
+
+      // Claimed amounts are payment facts, not schedule previews. Aggregate
+      // every real V1/V2/V3 claim record by P-level so a migrated counter or
+      // an incomplete snapshot can never erase already-paid income in UI.
+      const paidByLevel = new Map();
+      const addPaid = (levelRaw, amountRaw, timestampRaw) => {
+        const level = Number(levelRaw ?? 0n);
+        const amount = BigInt(amountRaw ?? 0n);
+        if (!level || amount === 0n) return;
+        const previous = paidByLevel.get(level) ?? { amount: 0n, lastClaimAt: 0n };
+        const timestamp = BigInt(timestampRaw ?? 0n);
+        paidByLevel.set(level, {
+          amount: previous.amount + amount,
+          lastClaimAt: timestamp > previous.lastClaimAt ? timestamp : previous.lastClaimAt,
+        });
+      };
+      for (const row of v1History) {
+        addPaid(row.powerLevel ?? row[5], row.claimedAmount ?? row[4], row.timestamp ?? row[6]);
+      }
+      for (const row of legacyIncomeHistory) {
+        if (Number(row.incomeType ?? row[0] ?? 0n) === 3) {
+          addPaid(row.level ?? row[1], row.amount ?? row[2], row.timestamp ?? row[3]);
+        }
+      }
+      for (const row of powerHistory) {
+        addPaid(row.level ?? row[0], row.amount ?? row[1], row.timestamp ?? row[2]);
+      }
 
       // V3 snapshots only retain the continuing rank. Read historical rank
       // rows from V2 and V1 so P1/P2/P3 remain visible after migration.
@@ -303,6 +341,7 @@ export const Income4 = () => {
         forceV1Baseline: user.toLowerCase() === V1_POWER_BASELINE_OVERRIDE_USER,
       } : null);
       setLegacyPowerLevels(fallbackByLevel);
+      setClaimedPowerByLevel(Object.fromEntries(paidByLevel));
       setNextPowerProgress({
         level: nextPowerLevel,
         required: BigInt(nextThreshold) > BigInt(nextQualified)
@@ -321,6 +360,7 @@ export const Income4 = () => {
       setLegacyPower(null);
       setV1Power(null);
       setLegacyPowerLevels({});
+      setClaimedPowerByLevel({});
       setPowerRecovery(null);
       setNextPowerProgress({ level: 0, required: 0n, qualified: 0n });
       setMessage(error?.shortMessage || error?.message || "Could not load Power details");
@@ -390,6 +430,10 @@ export const Income4 = () => {
     : finalizedInV1
     ? visibleV2Claimed + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n)
     : BigInt(details?.totalClaimed ?? 0n) + (showV1Power ? BigInt(v1Power?.totalClaimed ?? 0n) : 0n);
+  const claimHistoryTotal = Object.values(claimedPowerByLevel).reduce(
+    (total, item) => total + BigInt(item?.amount ?? 0n), 0n,
+  );
+  const displayedPowerClaimed = claimHistoryTotal > 0n ? claimHistoryTotal : powerClaimed;
   const displayedReleasedCount = v1BaselineAuthoritative && !hasHigherV2Power
     // Do not derive historic V1 releases from V3's test/ROI interval. The
     // V1 history has the authoritative completed-cycle count for this known
@@ -434,13 +478,14 @@ export const Income4 = () => {
       const virtualReleased = ((powerTiming.now - displayed.activatedAt) / (10n * powerTiming.roiDay)) + 1n;
       releasedCount = Math.max(releasedCount, Number(virtualReleased > 20n ? 20n : virtualReleased));
     }
+    const paidHistory = claimedPowerByLevel[Number(displayed.level)];
     return {
       level: `P${displayed.level}`,
       activatedAt: formatTime(displayed.activatedAt),
       releasedCount: `${releasedCount} / 20`,
       claimedCount: Number(displayed.claimedCount ?? 0n),
-      claimedAmount: formatUsdt(displayed.claimedAmount),
-      lastClaimAt: formatTime(displayed.lastClaimAt),
+      claimedAmount: formatUsdt(paidHistory?.amount ?? displayed.claimedAmount),
+      lastClaimAt: formatTime(paidHistory?.lastClaimAt ?? displayed.lastClaimAt),
     };
   });
   // `getPowerDetails` exposes the continuing V3 rank only. Preserve every
@@ -453,8 +498,8 @@ export const Income4 = () => {
       activatedAt: formatTime(item.activatedAt),
       releasedCount: `${Number(item.releasedCount ?? 0n)} / 20`,
       claimedCount: Number(item.claimedCount ?? 0n),
-      claimedAmount: formatUsdt(item.claimedAmount),
-      lastClaimAt: formatTime(item.lastClaimAt),
+      claimedAmount: formatUsdt(claimedPowerByLevel[Number(item.level)]?.amount ?? item.claimedAmount),
+      lastClaimAt: formatTime(claimedPowerByLevel[Number(item.level)]?.lastClaimAt ?? item.lastClaimAt),
     }));
   const historyRows = [
     ...v2HistoryRows,
@@ -496,7 +541,7 @@ export const Income4 = () => {
         {card("Active Power Level", activeLevel ? `P${activeLevel}` : "0")}
         {card("Achieved Power Level (Now)", achievedLevel ? `P${achievedLevel}` : "0")}
         {card("Power Level Activated At", formatTime(powerTime))}
-        {card("Total Power Income Claimed", formatUsdt(powerClaimed))}
+        {card("Total Power Income Claimed", formatUsdt(displayedPowerClaimed))}
         {card(
           "Power Income Claimable",
           formatUsdt(powerClaimable),
