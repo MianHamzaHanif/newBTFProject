@@ -52,7 +52,10 @@ export const Activation = () => {
         // A migrated V2 package may have no V3 history row, but its current
         // limit/usage is already stored in V3. In that case V2 is only a
         // history fallback: adding both aggregates counts the same use twice.
-        const v3OwnsMigratedState = v3Rows.length === 0 && v3AggregateLimit > 0n;
+        // Once V3 has a package row, its aggregate cap/usage is the current
+        // authoritative state for migrated packages. Adding V2's aggregate
+        // again doubles the same migrated usage (e.g. 305.0625 -> 610.125).
+        const v3OwnsMigratedState = v3Rows.length > 0 && v3AggregateLimit > 0n;
         const activeIncomeUsed = v3OwnsMigratedState
           ? v3AggregateUsed
           : sum(activeV1, (record) => record.usedIncome)

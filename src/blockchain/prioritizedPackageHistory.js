@@ -342,7 +342,18 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
   // such row by its immutable amount and its source registration flag. This
   // removes the V2 mirror without requiring logs/events and without hiding a
   // separately purchased V3 package.
-  const migratedV2 = v2.filter((record) => record.migratedToV3);
+  // Some V1->V2 bridge rows were imported into V3 through the V1 snapshot
+  // path, so their `v2IndexRegistered` flag is intentionally false. They
+  // are nevertheless the exact V2 continuation when their immutable V1
+  // timestamp+amount is V3-registered. Include them for display-field
+  // restoration and de-duplication.
+  const migratedV2 = v2.filter((record) => (
+    record.migratedToV3
+    || (record.legacyV1Mirror && v1AlreadyInV3.some((v1Record) => (
+      v1Record.timestamp === record.timestamp
+      && v1Record.amount === record.amount
+    )))
+  ));
   const pairedV2Indexes = new Set();
   const v3WithSource = v3.map((record) => {
     // Migration ran before normal V3 buying was enabled; only this prefix can
@@ -355,7 +366,16 @@ export const loadPrioritizedPackageHistory = async (walletAddress) => {
     ));
     if (!matched) return record;
     pairedV2Indexes.add(matched.sourceIndex);
-    return { ...record, migratedV2Index: matched.sourceIndex };
+    // The deployed V3 migration preserves the package/cap state, but older
+    // imported rows can have zeroed per-package self-ROI display fields.
+    // Keep V3 as the authoritative package row and restore only those zero
+    // display values from its matched V2 continuation.
+    return {
+      ...record,
+      migratedV2Index: matched.sourceIndex,
+      maximum: record.maximum === 0n ? matched.maximum : record.maximum,
+      generated: record.maximum === 0n ? matched.generated : record.generated,
+    };
   });
   const v3Coverage = countRecords(v3WithSource);
   const v2NotRepresentedInV3 = v2.filter((record) => (
