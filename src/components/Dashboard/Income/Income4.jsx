@@ -56,6 +56,10 @@ const V1_POWER_MODULE_ABI = [
 ];
 const POWER_LEG_CAP_BPS = 4000n;
 const BASIS_POINTS = 10000n;
+const powerInstallmentAmount = (level) => {
+  const units = [0n, 25n, 50n, 100n, 250n, 500n, 1000n, 2500n, 5000n, 10000n];
+  return (units[Number(level)] ?? 0n) * 10n ** 18n;
+};
 // This account's P1 snapshot was imported without the already-paid V1
 // installment baseline. Until that on-chain snapshot is repaired, display
 // its P1 from V1 so the UI cannot present those paid cycles again.
@@ -333,11 +337,26 @@ export const Income4 = () => {
           fallbackByLevel[level] = { ...fallbackByLevel[level], activatedAt };
         }
       }
-      // V2 is newer than V1 for a rank only if it actually has a stored
-      // payment value. Otherwise retain the complete V1 historic row.
+      // The history table must show the complete journey of a rank. Legacy
+      // V2 counters are additional to V1 counters, not a replacement for
+      // them. Keep the matching rank's V1 + V2 released/claimed cycles
+      // together. The separately handled V1-only recovery account remains
+      // protected by its scoped override below.
       for (const row of legacyRows) {
+        const previous = fallbackByLevel[row.level] ?? {
+          level: row.level, activatedAt: 0n, releasedCount: 0n, claimedAmount: 0n, claimedCount: 0n, lastClaimAt: 0n,
+        };
         if (BigInt(row.releasedCount) || BigInt(row.claimedAmount) || BigInt(row.claimedCount)) {
-          fallbackByLevel[row.level] = row;
+          fallbackByLevel[row.level] = {
+            ...previous,
+            activatedAt: BigInt(previous.activatedAt) || BigInt(row.activatedAt),
+            releasedCount: BigInt(previous.releasedCount) + BigInt(row.releasedCount),
+            claimedAmount: BigInt(previous.claimedAmount) + BigInt(row.claimedAmount),
+            claimedCount: BigInt(previous.claimedCount) + BigInt(row.claimedCount),
+            lastClaimAt: BigInt(row.lastClaimAt) > BigInt(previous.lastClaimAt)
+              ? row.lastClaimAt
+              : previous.lastClaimAt,
+          };
         }
       }
       // The lens only knows the Registry's V2 rank. A migrated V1/checkpoint
@@ -539,6 +558,15 @@ export const Income4 = () => {
     (total, item) => total + BigInt(item?.amount ?? 0n), 0n,
   );
   const displayedPowerClaimed = claimHistoryTotal > 0n ? claimHistoryTotal : powerClaimed;
+  const netClaimedCyclesForLevel = (level, fallbackCount = 0n) => {
+    const amount = BigInt(claimedPowerByLevel[Number(level)]?.amount ?? 0n);
+    const installment = powerInstallmentAmount(level);
+    // A payment history amount is definitive. Only use the contract counter
+    // when no per-level payment history exists for that rank.
+    return amount > 0n && installment > 0n
+      ? Number(amount / installment)
+      : Number(fallbackCount ?? 0n);
+  };
   const displayedReleasedCount = v1BaselineAuthoritative && !hasHigherV2Power
     // Do not derive historic V1 releases from V3's test/ROI interval. The
     // V1 history has the authoritative completed-cycle count for this known
@@ -578,7 +606,11 @@ export const Income4 = () => {
           lastClaimAt: v1Power.lastClaimAt,
         }
       : hasV3Snapshot ? item : (fallback ?? item);
-    let releasedCount = Number(displayed.releasedCount ?? 0n);
+    // V3 migration can have a zero/partial snapshot. For every normal user,
+    // the V1 + V2 historical counters remain the source for the history row.
+    // The V3 counter is used only when no historical row exists at all.
+    const cycleSource = !isOverriddenV1Level && fallback ? fallback : displayed;
+    let releasedCount = Number(cycleSource.releasedCount ?? 0n);
     if (!isOverriddenV1Level && Number(displayed.level) === activeLevel && displayed.activatedAt && powerTiming.now >= displayed.activatedAt) {
       const virtualReleased = ((powerTiming.now - displayed.activatedAt) / (10n * powerTiming.roiDay)) + 1n;
       releasedCount = Math.max(releasedCount, Number(virtualReleased > 20n ? 20n : virtualReleased));
@@ -588,7 +620,7 @@ export const Income4 = () => {
       level: `P${displayed.level}`,
       activatedAt: formatTime(displayed.activatedAt),
       releasedCount: `${releasedCount} / 20`,
-      claimedCount: Number(displayed.claimedCount ?? 0n),
+      claimedCount: netClaimedCyclesForLevel(displayed.level, cycleSource.claimedCount),
       claimedAmount: formatUsdt(paidHistory?.amount ?? displayed.claimedAmount),
       lastClaimAt: formatTime(paidHistory?.lastClaimAt ?? displayed.lastClaimAt),
     };
@@ -602,7 +634,7 @@ export const Income4 = () => {
       level: `P${item.level}`,
       activatedAt: formatTime(item.activatedAt),
       releasedCount: `${Number(item.releasedCount ?? 0n)} / 20`,
-      claimedCount: Number(item.claimedCount ?? 0n),
+      claimedCount: netClaimedCyclesForLevel(item.level, item.claimedCount),
       claimedAmount: formatUsdt(claimedPowerByLevel[Number(item.level)]?.amount ?? item.claimedAmount),
       lastClaimAt: formatTime(claimedPowerByLevel[Number(item.level)]?.lastClaimAt ?? item.lastClaimAt),
     }));
