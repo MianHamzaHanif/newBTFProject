@@ -19,6 +19,10 @@ import "../styles/style.css";
 
 const CLAIMS_PAUSED = !V3ActionsEnabled;
 const MIGRATION_PAUSED_MESSAGE = "Claiming is temporarily unavailable while system migration is under construction. Please check back soon.";
+// P1 was marked achieved for this migrated account but its V1 paid-cycle
+// baseline was not written to V3. Prevent the V3 lens preview from exposing
+// its already-claimed 150 as a second claim in the UI.
+const V1_POWER_BASELINE_OVERRIDE_USER = "0x340175da3dac792f372f8e7eb7edf47cadb96c4c";
 
 const claimActions = [
   { method: "claimDirectIncome", incomeType: 0, label: "Direct Income" },
@@ -114,6 +118,12 @@ export default function V2ClaimIncome() {
             // combined here; users claim only against the V3 deployment.
             currentAmount = await incomeLens.getIncomeReady(wallet, action.incomeType);
           } catch {
+            currentAmount = 0n;
+          }
+          if (
+            action.incomeType === 3
+            && wallet.toLowerCase() === V1_POWER_BASELINE_OVERRIDE_USER
+          ) {
             currentAmount = 0n;
           }
 
