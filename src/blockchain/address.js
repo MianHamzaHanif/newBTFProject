@@ -6,17 +6,17 @@ const configuredAddress = (value, fallback = "") => {
   return /^0x[0-9a-fA-F]{40}$/.test(address) ? address.toLowerCase() : address;
 };
 
-// V3 active settlement is BTF until the DAO performs its one-time USDT switch.
-export const TokenAddress = configuredAddress(import.meta.env.VITE_BTF_V3_TOKEN_ADDRESS, "0xc6D2d2E5894Bbe5c2DEBa2b9069184740634Cf03");
-export const SettlementTokenSymbol = import.meta.env.VITE_BTF_SETTLEMENT_TOKEN_SYMBOL || "BTF";
-export const ReferralNetworkAddress = configuredAddress(import.meta.env.VITE_BTF_V3_REGISTRY_ADDRESS, "0xDB9FfA388F7ba5992B352413Bae7dc8049269bB0");
+// V3 active settlement is BSC USDT.
+export const TokenAddress = configuredAddress(import.meta.env.VITE_BTF_V3_TOKEN_ADDRESS, "0x55d398326f99059fF775485246999027B3197955");
+export const SettlementTokenSymbol = import.meta.env.VITE_BTF_SETTLEMENT_TOKEN_SYMBOL || "USDT";
+export const ReferralNetworkAddress = configuredAddress(import.meta.env.VITE_BTF_V3_REGISTRY_ADDRESS, "0x41458F6F18DA51457f3111561253b24498570778");
 export const V3ReferralRegistryAddress = ReferralNetworkAddress;
-export const PackageManagerAddress = configuredAddress(import.meta.env.VITE_BTF_V3_PACKAGE_MANAGER_ADDRESS, "0x43799895581198966b551C42806C19a5517eD1Cb");
-export const V2LedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V3_LEDGER_ADDRESS, "0x766d9FdC5B5dCD157d4C28e2330683e87CCCcf2E");
-export const V2DaoAddress = configuredAddress(import.meta.env.VITE_BTF_V3_DAO_ADDRESS, "0xC780F67c2390e92A68C579604A94ebdD0cE22533");
-export const V2FlushLedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V3_FLUSH_LEDGER_ADDRESS, "0xE707776b4ea7945F806Cff9e718c3ecb78aFb454");
-export const IncomeReadyLensAddress = configuredAddress(import.meta.env.VITE_BTF_V3_INCOME_READY_LENS_ADDRESS, "0xA5D955BF8578026F7dbBe6fC960c327b79c7038D");
-export const PackageMigrationSourceAddress = configuredAddress(import.meta.env.VITE_BTF_V3_PACKAGE_MIGRATION_SOURCE_ADDRESS, "0x15446FB8a12d899DdD57Cf23d66dC03250C2376D");
+export const PackageManagerAddress = configuredAddress(import.meta.env.VITE_BTF_V3_PACKAGE_MANAGER_ADDRESS, "0xae9Ccb96Cd4EaDDa2F12715f58eFA614F5F656Cb");
+export const V2LedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V3_LEDGER_ADDRESS, "0x75AdD23C59a1bA194319ECaEDcf72B3DF9F65998");
+export const V2DaoAddress = configuredAddress(import.meta.env.VITE_BTF_V3_DAO_ADDRESS, "0x2EF95f8Ab20A1109E3afC1E266D8a2fC6f502865");
+export const V2FlushLedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V3_FLUSH_LEDGER_ADDRESS, "0xC56F1D63DAB0D19d6Ea669fcFf64f5C9F6f98c63");
+export const IncomeReadyLensAddress = configuredAddress(import.meta.env.VITE_BTF_V3_INCOME_READY_LENS_ADDRESS, "0xC2794b78595E763a619ced510bb78e5840B02c05");
+export const PackageMigrationSourceAddress = configuredAddress(import.meta.env.VITE_BTF_V3_PACKAGE_MIGRATION_SOURCE_ADDRESS, "0x2B35e572036e8EEe045563B21468BFc686e6fC48");
 export const V2DeploymentBlock = import.meta.env.VITE_BTF_V3_DEPLOYMENT_BLOCK || "0";
 
 // Legacy source deployments: use only for V1/V2 history and migration reads.

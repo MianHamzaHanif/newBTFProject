@@ -4,22 +4,9 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2ReferralRegistryABI from "../../../blockchain/v2ReferralRegistryABI";
 import { ReferralNetworkAddress } from "../../../blockchain/address";
-import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
-import { loadPrioritizedPackageHistory } from "../../../blockchain/prioritizedPackageHistory";
 import "../styles/style.css";
-
-const V1_POWER_MANAGER_ABI = [
-  "function powerIncomeModule() view returns(address)",
-  "function rewardAchievedAt(address user,uint256 index) view returns(uint256)",
-];
-const V1_POWER_MODULE_ABI = ["function activePowerLevel(address) view returns(uint256)"];
-const V1_DIRECT_READER_ABI = [
-  "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
-  "function getLevelUsersLength(address upline,uint256 level) view returns(uint256)",
-  "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns(address)",
-];
 
 const formatUsdt = (value) => {
   try {
@@ -31,26 +18,6 @@ const formatUsdt = (value) => {
 };
 
 const shortAddress = (value) => `${value.slice(0, 6)}...${value.slice(-4)}`;
-
-const createV1ReadProvider = () => {
-  const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
-  request.timeout = 30_000;
-  return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
-};
-
-const combinedPackageBusiness = async (address) => {
-  const { records } = await loadPrioritizedPackageHistory(address);
-  return records.reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
-};
-
-const v3NewTeamBusiness = async (address, v3User, registry) => {
-  const total = BigInt(v3User?.totalTeamDeposit ?? v3User?.[4] ?? 0n);
-  if (!v3User || total === 0n) return 0n;
-  const importedV1LevelBusiness = (await Promise.all(
-    Array.from({ length: 15 }, (_, level) => registry.legacyLevelRemaining(address, level).catch(() => 0n)),
-  )).reduce((sum, amount) => sum + BigInt(amount), 0n);
-  return total > importedV1LevelBusiness ? total - importedV1LevelBusiness : 0n;
-};
 
 async function ensureBscMainnet() {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
@@ -92,26 +59,9 @@ export const PowerIncomeWithdraw = () => {
         registry.getPowerRewardSync(user),
       ]);
       const achieved = Number(achievedPowerRaw);
-      const v1Provider = createV1ReadProvider();
-      const v1PowerManager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, v1Provider);
-      const v1PowerModule = new ethers.Contract(await v1PowerManager.powerIncomeModule(), V1_POWER_MODULE_ABI, v1Provider);
-      const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, v1Provider);
-      const [v1AchievedRaw, v1RewardTimes] = await Promise.all([
-        v1PowerModule.activePowerLevel(user),
-        Promise.all(Array.from({ length: 12 }, (_, index) => v1PowerManager.rewardAchievedAt(user, index + 1))),
-      ]);
-      const v1Achieved = Number(v1AchievedRaw);
-      const v1AchievedReward = v1RewardTimes.reduce(
-        (highest, achievedAt, index) => BigInt(achievedAt) > 0n ? index + 1 : highest,
-        0,
-      );
       const achievedReward = Number(achievedRewardRaw);
-      // The next V2 target begins after the highest rank the user already
-      // holds, whether that P-level is in V2 or still shown from V1.
-      const effectivePowerLevel = Math.max(achieved, v1Achieved);
-      const nextLevel = effectivePowerLevel < 9 ? effectivePowerLevel + 1 : 0;
-      const effectiveRewardLevel = Math.max(achievedReward, v1AchievedReward);
-      const nextReward = effectiveRewardLevel < 12 ? effectiveRewardLevel + 1 : 0;
+      const nextLevel = achieved < 9 ? achieved + 1 : 0;
+      const nextReward = achievedReward < 12 ? achievedReward + 1 : 0;
       const [requiredBusiness, rewardRequiredBusiness] = await Promise.all([
         nextLevel ? registry.powerThreshold(nextLevel) : 0n,
         nextReward ? registry.rewardThreshold(nextReward) : 0n,
@@ -119,49 +69,25 @@ export const PowerIncomeWithdraw = () => {
 
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
       const rewardCapPerLeg = (rewardRequiredBusiness * 4000n) / 10000n;
-      const [v1DirectResult, v2DirectResult] = await Promise.allSettled([
-        (async () => {
-          const count = Number(await v1Registry.getLevelUsersLength(user, 0));
-          return Promise.all(Array.from({ length: count }, (_, index) => v1Registry.getLevelUserAt(user, 0, index)));
-        })(),
-        (async () => {
-          const count = Number(await registry.getLevelUsersLength(user, 0));
-          return Promise.all(Array.from({ length: count }, (_, index) => registry.getLevelUserAt(user, 0, index)));
-        })(),
-      ]);
-      const directMap = new Map();
-      for (const direct of v1DirectResult.status === "fulfilled" ? v1DirectResult.value : []) {
-        directMap.set(direct.toLowerCase(), { address: direct, inV1: true, inV2: false });
-      }
-      for (const direct of v2DirectResult.status === "fulfilled" ? v2DirectResult.value : []) {
-        const previous = directMap.get(direct.toLowerCase());
-        directMap.set(direct.toLowerCase(), { address: direct, inV1: previous?.inV1 ?? false, inV2: true });
-      }
-      const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v3User, selfBusiness, legacyCounted, everPackage] = await Promise.all([
-          member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
-          member.inV2 ? registry.users(member.address).catch(() => null) : null,
-          combinedPackageBusiness(member.address).catch(() => 0n),
-          member.inV2 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
-          member.inV2 ? registry.hasEverPackage(member.address).catch(() => true) : true,
+      const directCount = Number(await registry.getLevelUsersLength(user, 0));
+      const directs = await Promise.all(
+        Array.from({ length: directCount }, (_, index) => registry.getLevelUserAt(user, 0, index)),
+      );
+      const directRows = await Promise.all(directs.map(async (direct, index) => {
+        const [selfBusiness, teamBusiness, legBusiness] = await Promise.all([
+          registry.legSelfBusiness(user, direct),
+          registry.legTeamBusiness(user, direct),
+          registry.legBusiness(user, direct),
         ]);
-        const v3TeamNew = await v3NewTeamBusiness(member.address, v3User, registry);
-        const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n) + v3TeamNew;
-        // Do not use the previously imported V3 `legBusiness` value here.
-        // Older migrations used a single V2 source and can omit V1 business.
-        // The table and both rank summaries must use the identical,
-        // reconciled V1 + V2/V3 calculation.
-        const legBusiness = BigInt(selfBusiness) + teamBusiness;
-        const eligible = legacyCounted || everPackage;
-        const counted = nextLevel && eligible
+        const counted = nextLevel
           ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
           : 0n;
-        const rewardCounted = nextReward && eligible
+        const rewardCounted = nextReward
           ? (legBusiness > rewardCapPerLeg ? rewardCapPerLeg : legBusiness)
           : 0n;
         return {
           sno: index + 1,
-          direct: shortAddress(member.address),
+          direct: shortAddress(direct),
           selfBusiness: formatUsdt(selfBusiness),
           teamBusiness: formatUsdt(teamBusiness),
           countedRaw: counted,
@@ -176,11 +102,7 @@ export const PowerIncomeWithdraw = () => {
 
       setSummary({
         achieved,
-        // V2 is the authoritative display when both contracts report P1,
-        // P2, etc. V1 is only a fallback / separate legacy rank.
-        v1Achieved: v1Achieved && v1Achieved !== achieved ? v1Achieved : 0,
         achievedReward,
-        v1AchievedReward: v1AchievedReward && v1AchievedReward !== achievedReward ? v1AchievedReward : 0,
         nextLevel,
         nextReward,
         qualifiedBusiness,
@@ -189,7 +111,7 @@ export const PowerIncomeWithdraw = () => {
         rewardRequiredBusiness,
         remaining,
         capPerLeg,
-        directCount: directMap.size,
+        directCount,
         syncState,
       });
       setRows(directRows);
@@ -268,13 +190,13 @@ export const PowerIncomeWithdraw = () => {
         </div>
       </div>
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
-        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Power</p><h4 className="withdrawal-card-value">{summary?.achieved ? `P${summary.achieved}` : summary?.v1Achieved ? `P${summary.v1Achieved}` : "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Power</p><h4 className="withdrawal-card-value">{summary?.achieved ? `P${summary.achieved}` : "0"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Power</p><h4 className="withdrawal-card-value">{summary?.nextLevel ? `P${summary.nextLevel}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Power)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.qualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Business Remaining to Achieve</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.remaining)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Maximum Count from One Leg (40%)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.capPerLeg)} USDT</h4></div>
-        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achievedReward ? `R${summary.achievedReward}` : summary?.v1AchievedReward ? `R${summary.v1AchievedReward}` : "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achievedReward ? `R${summary.achievedReward}` : "0"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Reward</p><h4 className="withdrawal-card-value">{summary?.nextReward ? `R${summary.nextReward}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Reward)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.rewardQualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Reward Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.rewardRequiredBusiness)} USDT</h4></div>

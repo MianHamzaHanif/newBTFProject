@@ -14,19 +14,12 @@ import {
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
-import { loadPrioritizedPackageHistory } from "../../../blockchain/prioritizedPackageHistory";
 import "../styles/style.css";
 
 const V1_REWARD_MANAGER_ABI = [
   "function rewardAchievedAt(address user,uint256 index) view returns(uint256)",
   "function rewardClaimedAmountByIndex(address user,uint256 index) view returns(uint256)",
 ];
-const V1_DIRECT_READER_ABI = [
-  "function users(address) view returns(uint256 id,address referral,uint256 registeredAt,uint256 totalTeam,uint256 totalTeamDeposit,uint256 selfDeposit,uint256 totalTeamStakeToken,uint256 selfStakeToken,bool exists)",
-  "function getLevelUsersLength(address upline,uint256 level) view returns(uint256)",
-  "function getLevelUserAt(address upline,uint256 level,uint256 index) view returns(address)",
-];
-
 const formatUsdt = (value) => {
   try {
     const [whole, decimals = ""] = ethers.formatEther(value ?? 0n).split(".");
@@ -55,24 +48,6 @@ const createV1ReadProvider = () => {
   const request = new ethers.FetchRequest(V1_MAINNET.rpcUrl);
   request.timeout = 30_000;
   return new ethers.JsonRpcProvider(request, V1_MAINNET.chainId, { staticNetwork: true, batchMaxCount: 1, batchStallTime: 0 });
-};
-
-const combinedPackageBusiness = async (address) => {
-  const { records } = await loadPrioritizedPackageHistory(address);
-  return records.reduce((total, record) => total + BigInt(record.amount ?? 0n), 0n);
-};
-
-// V3's total can contain the imported legacy level seed. Only the portion
-// above that seed is new V3 team business and may be added to V1 + V2.
-const v3NewTeamBusiness = async (address, v3User, registry) => {
-  const v3Total = BigInt(v3User?.totalTeamDeposit ?? v3User?.[4] ?? 0n);
-  if (!v3User || v3Total === 0n) return 0n;
-  const importedLegacyBusiness = (await Promise.all(
-    Array.from({ length: 15 }, (_, level) =>
-      registry.legacyLevelRemaining(address, level).catch(() => 0n),
-    ),
-  )).reduce((total, amount) => total + BigInt(amount), 0n);
-  return v3Total > importedLegacyBusiness ? v3Total - importedLegacyBusiness : 0n;
 };
 
 async function ensureBscMainnet() {
@@ -120,53 +95,25 @@ export const Income5 = () => {
         ]);
         return { index, achievedAt: BigInt(achievedAt), claimedAmount: BigInt(claimedAmount) };
       }));
-      const v1RewardTimes = v1RewardSnapshots.map((snapshot) => snapshot.achievedAt);
-      const v1Registry = new ethers.Contract(V1_MAINNET.referralNetwork, V1_DIRECT_READER_ABI, v1Provider);
-      const v1Achieved = v1RewardTimes.reduce((highest, achievedAt, offset) => BigInt(achievedAt) > 0n ? offset + 1 : highest, 0);
-      // Continue from the highest reward already achieved in either V1 or
-      // V2; the V2 target business is then previewed using the V2 formula.
-      const effectiveAchieved = Math.max(achieved, v1Achieved);
-      const nextIndex = effectiveAchieved < 12 ? effectiveAchieved + 1 : 0;
+      const nextIndex = achieved < 12 ? achieved + 1 : 0;
       const requiredBusiness = nextIndex
         ? await registry.rewardThreshold(nextIndex)
         : 0n;
       const capPerLeg = (requiredBusiness * 4000n) / 10000n;
-      const [v1DirectResult, v3DirectResult] = await Promise.allSettled([
-        (async () => {
-          const count = Number(await v1Registry.getLevelUsersLength(user, 0));
-          return Promise.all(Array.from({ length: count }, (_, index) => v1Registry.getLevelUserAt(user, 0, index)));
-        })(),
-        (async () => {
-          const count = Number(await registry.getLevelUsersLength(user, 0));
-          return Promise.all(Array.from({ length: count }, (_, index) => registry.getLevelUserAt(user, 0, index)));
-        })(),
-      ]);
-      const directMap = new Map();
-      for (const address of v1DirectResult.status === "fulfilled" ? v1DirectResult.value : []) directMap.set(address.toLowerCase(), { address, inV1: true, inV2: false });
-      for (const address of v3DirectResult.status === "fulfilled" ? v3DirectResult.value : []) {
-        const prior = directMap.get(address.toLowerCase());
-        directMap.set(address.toLowerCase(), { address, inV1: prior?.inV1 ?? false, inV3: true });
-      }
-      const directRows = await Promise.all(Array.from(directMap.values()).map(async (member, index) => {
-        const [v1User, v3User, selfBusiness, legacyCounted, everPackage] = await Promise.all([
-          member.inV1 ? v1Registry.users(member.address).catch(() => null) : null,
-          member.inV3 ? registry.users(member.address).catch(() => null) : null,
-          combinedPackageBusiness(member.address).catch(() => 0n),
-          member.inV3 ? registry.legacyDirectCounted(member.address).catch(() => false) : false,
-          member.inV3 ? registry.hasEverPackage(member.address).catch(() => true) : true,
+      const directCount = Number(await registry.getLevelUsersLength(user, 0));
+      const directs = await Promise.all(
+        Array.from({ length: directCount }, (_, index) => registry.getLevelUserAt(user, 0, index)),
+      );
+      const directRows = await Promise.all(directs.map(async (direct, index) => {
+        const [selfBusiness, teamBusiness, legBusiness] = await Promise.all([
+          registry.legSelfBusiness(user, direct),
+          registry.legTeamBusiness(user, direct),
+          registry.legBusiness(user, direct),
         ]);
-        // Keep the Reward table byte-for-byte aligned with the Power table:
-        // prioritized package history (V3 > V2 > V1), plus only V3 business
-        // that was created after the legacy level seed.
-        const v3TeamBusiness = await v3NewTeamBusiness(member.address, v3User, registry);
-        const teamBusiness = BigInt(v1User?.totalTeamDeposit ?? v1User?.[4] ?? 0n)
-          + v3TeamBusiness;
-        const legBusiness = BigInt(selfBusiness) + teamBusiness;
-        const eligible = legacyCounted || everPackage;
-        const counted = nextIndex && eligible
+        const counted = nextIndex
           ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
           : 0n;
-        return { sno: index + 1, direct: shortAddress(member.address), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), countedRaw: counted };
+        return { sno: index + 1, direct: shortAddress(direct), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), countedRaw: counted };
       }));
       const qualifiedBusiness = directRows.reduce((total, row) => total + row.countedRaw, 0n);
       const remaining = requiredBusiness > qualifiedBusiness
@@ -228,9 +175,7 @@ export const Income5 = () => {
         })));
 
       setSummary({
-        // Display the highest rank already held across V1 and V2. The
-        // separate V1 card is intentionally hidden, not its rank itself.
-        achieved: effectiveAchieved,
+        achieved,
         nextIndex,
         qualifiedBusiness,
         requiredBusiness,
@@ -322,7 +267,7 @@ export const Income5 = () => {
       </div>
 
       <div className="withdrawal-grid" style={{ marginBottom: "14px" }}>
-        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achieved ? `R${summary.achieved}` : summary?.v1Achieved ? `R${summary.v1Achieved}` : "0"}</h4></div>
+        <div className="withdrawal-card"><p className="withdrawal-card-title">Achieved Reward</p><h4 className="withdrawal-card-value">{summary?.achieved ? `R${summary.achieved}` : "0"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Next Reward</p><h4 className="withdrawal-card-value">{summary?.nextIndex ? `R${summary.nextIndex}` : "All achieved"}</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Qualified Business (Next Reward)</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.qualifiedBusiness)} USDT</h4></div>
         <div className="withdrawal-card"><p className="withdrawal-card-title">Required Business</p><h4 className="withdrawal-card-value">{formatUsdt(summary?.requiredBusiness)} USDT</h4></div>
