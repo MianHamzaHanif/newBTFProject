@@ -103,18 +103,22 @@ export const FlushIncome = () => {
       // Summary cards are lifetime totals. V1 has only aggregate withdraw
       // summary records; V2/V3 additionally provide the itemized table.
       setSummary(v1Snapshot.totals.map((total, index) => formatAmount(total + v2Snapshot.totals[index] + v3Snapshot.totals[index])));
-      const toRows = (snapshot, source) => snapshot.records.map(({ record, recordIndex }) => {
+      const toRows = (snapshot, source) => snapshot.records.flatMap(({ record, recordIndex }) => {
         const typeOrder = Number(record.incomeType);
+        const amount = BigInt(record.amount ?? 0n);
+        // A zero summary/placeholder is not a Flush-history entry.  This
+        // also protects the table from old ledgers that contain empty slots.
+        if (!Number.isInteger(typeOrder) || typeOrder < 0 || typeOrder >= labels.length || amount === 0n) return [];
         const timestamp = Number(record.timestamp ?? 0n);
-        return {
+        return [{
           type: labels[typeOrder] || "Unknown",
           source,
           typeOrder,
-          amount: formatAmount(record.amount),
+          amount: formatAmount(amount),
           timestamp,
           time: formatTime(timestamp),
           recordIndex,
-        };
+        }];
       });
 
       // V1 records contain all five flush categories in one withdraw-summary
