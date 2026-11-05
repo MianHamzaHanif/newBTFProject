@@ -29,6 +29,10 @@ const formatTime = (value) => {
   if (!timestamp) return "-";
   return new Date(timestamp * 1000).toLocaleString();
 };
+// Every Power rank has exactly 20 installments. Historical V1/V2 rows can
+// contain an amount-derived counter larger than 20, but that is not a valid
+// release-cycle count and must never be shown as such in the V3 UI.
+const clampPowerCycles = (value) => Math.min(20, Math.max(0, Number(value ?? 0n)));
 const RANK_CHECKPOINT_READ_ABI = [
   "function getPowerSchedule(address) view returns(uint256 originalAchievedAt,uint256 nextInstallmentAt,uint256 paidInstallments,uint256 releasedAfterCutover,uint256 unpaidAmount,uint256 level,bool set)",
   "function previewPowerClaimable(address user) view returns(uint256 level,uint256 amount)"
@@ -653,7 +657,7 @@ export const Income4 = () => {
       : hasV3Snapshot
         ? displayed
         : (fallback ?? displayed);
-    let releasedCount = Number(cycleSource.releasedCount ?? 0n);
+    let releasedCount = clampPowerCycles(cycleSource.releasedCount);
     if (!isOverriddenV1Level && Number(displayed.level) === activeLevel && displayed.activatedAt && powerTiming.now >= displayed.activatedAt) {
       const virtualReleased = ((powerTiming.now - displayed.activatedAt) / (10n * powerTiming.roiDay)) + 1n;
       releasedCount = Math.max(releasedCount, Number(virtualReleased > 20n ? 20n : virtualReleased));
@@ -676,7 +680,7 @@ export const Income4 = () => {
     .map((item) => ({
       level: `P${item.level}`,
       activatedAt: formatTime(item.activatedAt),
-      releasedCount: `${Number(item.releasedCount ?? 0n)} / 20`,
+      releasedCount: `${clampPowerCycles(item.releasedCount)} / 20`,
       claimedCount: netClaimedCyclesForLevel(item.level, item.claimedCount),
       claimedAmount: formatUsdt(claimedPowerByLevel[Number(item.level)]?.amount ?? item.claimedAmount),
       lastClaimAt: formatTime(claimedPowerByLevel[Number(item.level)]?.lastClaimAt ?? item.lastClaimAt),
@@ -689,7 +693,7 @@ export const Income4 = () => {
     ...(!finalizedInV1 && legacyPower && !v2HistoryRows.some((item) => item.level === `P${legacyPower.level}`) ? [{
       level: `P${legacyPower.level}`,
       activatedAt: formatTime(legacyPower.originalAchievedAt),
-      releasedCount: `${legacyPower.paidInstallments} / 20`,
+      releasedCount: `${clampPowerCycles(legacyPower.paidInstallments)} / 20`,
       claimedCount: Number(legacyPower.paidInstallments),
       claimedAmount: "-",
       lastClaimAt: "V2 migrated schedule",
@@ -699,7 +703,7 @@ export const Income4 = () => {
       && !fallbackHistoryRows.some((item) => item.level === `P${v1Power.level}`) ? [{
       level: `P${v1Power.level}`,
       activatedAt: formatTime(v1Power.activatedAt),
-      releasedCount: `${finalizedBaselineMatchesV1 ? displayedReleasedCount : v1Power.claimedCount} / 20`,
+      releasedCount: `${clampPowerCycles(finalizedBaselineMatchesV1 ? displayedReleasedCount : v1Power.claimedCount)} / 20`,
       claimedCount: Number(v1Power.claimedCount),
       claimedAmount: formatUsdt(v1Power.totalClaimed),
       lastClaimAt: formatTime(v1Power.lastClaimAt),
