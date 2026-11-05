@@ -23,6 +23,7 @@ import {
   LegacyV2RegistryAddress,
 } from "../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
+import { getLegacyV2HistoryCutoffTimestamp, isLegacyV2HistoryVisible } from "../../blockchain/legacyV2HistoryCutoff";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 
 const TOKEN_LABEL = SettlementTokenSymbol;
@@ -253,7 +254,7 @@ const DashboardBottom = () => {
             };
           }),
         );
-        const [incomeRecords, withdrawRecords, levelOpen, legacyIncomeRecords, legacyWithdrawRecords, legacyLevelOpen, v1Summary, v1PackageRecords, v2PackageRecords, importedV1Indexes, prioritizedPackages] = await Promise.all([
+        const [incomeRecords, withdrawRecords, levelOpen, legacyIncomeRecords, legacyWithdrawRecords, legacyLevelOpen, v1Summary, v1PackageRecords, v2PackageRecords, importedV1Indexes, prioritizedPackages, legacyV2CutoffTimestamp] = await Promise.all([
           incomeRecordsPromise,
           withdrawRecordsPromise,
           levelOpenPromise,
@@ -265,6 +266,7 @@ const DashboardBottom = () => {
           v2PackageRecordsPromise,
           readImportedV1Indexes(v2Provider, walletAddress),
           loadPrioritizedPackageHistory(walletAddress).catch(() => ({ records: [] })),
+          getLegacyV2HistoryCutoffTimestamp(),
         ]);
         const [
           v1DirectIncome,
@@ -289,7 +291,12 @@ const DashboardBottom = () => {
           else if (incomeType === 4) totalsByType.reward += amount;
         }
         const v3Withdrawn = withdrawRecords.reduce((total, record) => total + BigInt(record.netAmount ?? record[2] ?? 0n), 0n);
-        const legacyV2Withdrawn = legacyWithdrawRecords.reduce((total, record) => total + BigInt(record.amount ?? record[0] ?? 0n), 0n);
+        const legacyV2Withdrawn = legacyWithdrawRecords.reduce((total, record) => {
+          const timestamp = BigInt(record.timestamp ?? record[1] ?? 0n);
+          return isLegacyV2HistoryVisible(timestamp, legacyV2CutoffTimestamp)
+            ? total + BigInt(record.amount ?? record[0] ?? 0n)
+            : total;
+        }, 0n);
         const v1Earned = BigInt(v1DirectIncome)
           + BigInt(v1SelfRoiIncome)
           + BigInt(v1LevelRoiIncome)

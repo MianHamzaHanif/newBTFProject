@@ -27,6 +27,7 @@ import {
 import { BSC_MAINNET, WALLET_ADD_CHAIN_PARAMS } from "../../blockchain/bscMainnetConfig";
 import { V1_MAINNET } from "../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../blockchain/readProvider";
+import { getLegacyV2HistoryCutoffTimestamp, isLegacyV2HistoryVisible } from "../../blockchain/legacyV2HistoryCutoff";
 import { loadPrioritizedPackageHistory } from "../../blockchain/prioritizedPackageHistory";
 
 const LEGACY_IMPORT_EVENT = new ethers.Interface([
@@ -242,11 +243,12 @@ const DashboardTop = () => {
         );
         const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, PackageManagerABI, v1Provider);
         const legacyLedger = new ethers.Contract(LegacyV2LedgerAddress, LegacyV2IncomeLedgerABI, v2Provider);
-        const [v1NetWithdrawn, withdrawFeeBP, legacyWithdrawLength, v3WithdrawLength] = await Promise.all([
+        const [v1NetWithdrawn, withdrawFeeBP, legacyWithdrawLength, v3WithdrawLength, legacyV2CutoffTimestamp] = await Promise.all([
           v1Manager.totalIncomeWithdrawnToken(wallet).catch(() => 0n),
           v1Manager.withdrawFeeBP().catch(() => 0n),
           legacyLedger.getUserWithdrawHistoryLength(wallet).catch(() => 0n),
           v2Ledger.getUserWithdrawHistoryLength(wallet).catch(() => 0n),
+          getLegacyV2HistoryCutoffTimestamp(),
         ]);
         const [legacyWithdrawals, v3Withdrawals] = await Promise.all([
           Promise.all(Array.from({ length: Number(legacyWithdrawLength) }, (_, index) =>
@@ -266,9 +268,12 @@ const DashboardTop = () => {
             ? (value * 10_000n) / (10_000n - feeBP)
             : value;
         };
-        const legacyNetWithdrawn = legacyWithdrawals.reduce(
-          (total, record) => total + BigInt(record?.amount ?? record?.[0] ?? 0n), 0n,
-        );
+        const legacyNetWithdrawn = legacyWithdrawals.reduce((total, record) => {
+          const timestamp = BigInt(record?.timestamp ?? record?.[1] ?? 0n);
+          return record && isLegacyV2HistoryVisible(timestamp, legacyV2CutoffTimestamp)
+            ? total + BigInt(record.amount ?? record[0] ?? 0n)
+            : total;
+        }, 0n);
         // V3 retains the gross amount explicitly, so no fee reconstruction
         // is needed for newly-created withdrawal records.
         const v3GrossWithdrawn = v3Withdrawals.reduce(
