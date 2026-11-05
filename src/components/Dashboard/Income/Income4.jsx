@@ -606,10 +606,15 @@ export const Income4 = () => {
           lastClaimAt: v1Power.lastClaimAt,
         }
       : hasV3Snapshot ? item : (fallback ?? item);
-    // V3 migration can have a zero/partial snapshot. For every normal user,
-    // the V1 + V2 historical counters remain the source for the history row.
-    // The V3 counter is used only when no historical row exists at all.
-    const cycleSource = !isOverriddenV1Level && fallback ? fallback : displayed;
+    // A populated V3 row owns its own released-cycle display. Do not add the
+    // V1/V2 counters to it: those are historical payment facts, while this
+    // column represents the current V3 schedule. Legacy data is used only
+    // when V3 has no snapshot for this P-level.
+    const cycleSource = isOverriddenV1Level
+      ? displayed
+      : hasV3Snapshot
+        ? displayed
+        : (fallback ?? displayed);
     let releasedCount = Number(cycleSource.releasedCount ?? 0n);
     if (!isOverriddenV1Level && Number(displayed.level) === activeLevel && displayed.activatedAt && powerTiming.now >= displayed.activatedAt) {
       const virtualReleased = ((powerTiming.now - displayed.activatedAt) / (10n * powerTiming.roiDay)) + 1n;
