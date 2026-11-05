@@ -17,6 +17,7 @@ import {
 } from "../../../blockchain/address";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { getLegacyV2HistoryCutoffTimestamp, isLegacyV2HistoryVisible } from "../../../blockchain/legacyV2HistoryCutoff";
 import "../styles/style.css";
 
 const CLAIMS_PAUSED = !V3ActionsEnabled;
@@ -121,6 +122,7 @@ export default function V2ClaimIncome() {
       // type, then add the matching V3 ledger history below.
       const v2ClaimedByType = Array.from({ length: claimActions.length }, () => 0n);
       try {
+        const legacyV2CutoffTimestamp = await getLegacyV2HistoryCutoffTimestamp();
         const v2HistoryLength = Number(await v2Ledger.getUserIncomeHistoryLength(wallet));
         const v2Records = await Promise.all(
           Array.from({ length: v2HistoryLength }, (_, historyIndex) =>
@@ -128,6 +130,8 @@ export default function V2ClaimIncome() {
           )
         );
         v2Records.forEach((record) => {
+          const timestamp = BigInt(record.timestamp ?? record[3] ?? 0n);
+          if (!isLegacyV2HistoryVisible(timestamp, legacyV2CutoffTimestamp)) return;
           const incomeType = Number(record.incomeType ?? record[0] ?? -1);
           if (incomeType >= 0 && incomeType < v2ClaimedByType.length) {
             v2ClaimedByType[incomeType] += BigInt(record.amount ?? record[2] ?? 0n);
