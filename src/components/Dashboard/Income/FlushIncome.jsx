@@ -13,6 +13,7 @@ const labels = ["Direct", "Self ROI", "Level ROI", "Power", "Reward"];
 const READ_BATCH_SIZE = 10;
 const V1_WITHDRAW_FLUSH_ABI = [
   "function getUserWithdrawSummaryRecordsLength(address user) view returns(uint256)",
+  "function getUserWithdrawSummaryRecordAt(address user,uint256 index) view returns(address,uint256,uint256,uint256,uint256,uint256,uint256,uint256)",
   "function getUserWithdrawSummaryFlushAt(address user,uint256 index) view returns(uint256 directFlushed,uint256 selfRoiFlushed,uint256 levelRoiFlushed,uint256 powerFlushed,uint256 rewardFlushed)",
 ];
 
@@ -70,7 +71,7 @@ export const FlushIncome = () => {
         try { return await readFlushLedger(ledgerAddress, createBscReadProvider()); }
         catch { return readFlushLedger(ledgerAddress, createBackupReadProvider()); }
       };
-      const readV1FlushTotals = async () => {
+      const readV1FlushSummary = async () => {
         const provider = new ethers.JsonRpcProvider(
           V1_MAINNET.rpcUrl,
           V1_MAINNET.chainId,
@@ -78,28 +79,36 @@ export const FlushIncome = () => {
         );
         const referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_WITHDRAW_FLUSH_ABI, provider);
         const length = Number(await referral.getUserWithdrawSummaryRecordsLength(user));
-        const records = await readInBatches(length, (index) => referral.getUserWithdrawSummaryFlushAt(user, index));
-        return records.reduce(
-          (totals, record) => totals.map((total, index) => total + BigInt(record[index] ?? 0n)),
+        const records = await readInBatches(length, async (index) => {
+          const [summary, flushes] = await Promise.all([
+            referral.getUserWithdrawSummaryRecordAt(user, index),
+            referral.getUserWithdrawSummaryFlushAt(user, index),
+          ]);
+          return { summary, flushes, recordIndex: index };
+        });
+        const totals = records.reduce(
+          (running, record) => running.map((total, index) => total + BigInt(record.flushes[index] ?? 0n)),
           [0n, 0n, 0n, 0n, 0n],
         );
+        return { totals, records };
       };
       const [v1Result, v2Result, v3Result] = await Promise.allSettled([
-        readV1FlushTotals(),
+        readV1FlushSummary(),
         readWithFallback(LegacyV2FlushLedgerAddress),
         readWithFallback(V2FlushLedgerAddress),
       ]);
-      const v1Totals = v1Result.status === "fulfilled" ? v1Result.value : [0n, 0n, 0n, 0n, 0n];
+      const v1Snapshot = v1Result.status === "fulfilled" ? v1Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
       const v2Snapshot = v2Result.status === "fulfilled" ? v2Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
       const v3Snapshot = v3Result.status === "fulfilled" ? v3Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
       // Summary cards are lifetime totals. V1 has only aggregate withdraw
       // summary records; V2/V3 additionally provide the itemized table.
-      setSummary(v1Totals.map((total, index) => formatAmount(total + v2Snapshot.totals[index] + v3Snapshot.totals[index])));
-      const toRows = (snapshot) => snapshot.records.map(({ record, recordIndex }) => {
+      setSummary(v1Snapshot.totals.map((total, index) => formatAmount(total + v2Snapshot.totals[index] + v3Snapshot.totals[index])));
+      const toRows = (snapshot, source) => snapshot.records.map(({ record, recordIndex }) => {
         const typeOrder = Number(record.incomeType);
         const timestamp = Number(record.timestamp ?? 0n);
         return {
           type: labels[typeOrder] || "Unknown",
+          source,
           typeOrder,
           amount: formatAmount(record.amount),
           timestamp,
@@ -108,7 +117,22 @@ export const FlushIncome = () => {
         };
       });
 
-      const combinedRows = [...toRows(v2Snapshot), ...toRows(v3Snapshot)]
+      // V1 records contain all five flush categories in one withdraw-summary
+      // record. Expand non-zero categories into normal table rows.
+      const v1Rows = v1Snapshot.records.flatMap(({ summary, flushes, recordIndex }) => {
+        const timestamp = Number(summary[7] ?? 0n);
+        return flushes.flatMap((amount, typeOrder) => BigInt(amount ?? 0n) === 0n ? [] : [{
+          type: labels[typeOrder],
+          source: "V1",
+          typeOrder,
+          amount: formatAmount(amount),
+          timestamp,
+          time: formatTime(timestamp),
+          recordIndex,
+        }]);
+      });
+
+      const combinedRows = [...v1Rows, ...toRows(v2Snapshot, "V2"), ...toRows(v3Snapshot, "V3")]
         .sort((a, b) => {
           if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
           if (a.recordIndex !== b.recordIndex) return b.recordIndex - a.recordIndex;
@@ -131,6 +155,7 @@ export const FlushIncome = () => {
 
   const columns = [
     { id: "sno", label: "S. No", sortable: true },
+    { id: "source", label: "Source", sortable: true },
     { id: "type", label: "Income Type", sortable: true },
     { id: "amount", label: "Flushed Amount", sortable: true },
     { id: "timestamp", label: "Flush Time", sortable: true },
@@ -153,6 +178,7 @@ export const FlushIncome = () => {
       <CustomTable columns={columns} rows={rows} renderRow={(row) => (
         <>
           <TableCell align="center">{row.sno}</TableCell>
+          <TableCell align="center">{row.source}</TableCell>
           <TableCell align="center">{row.type}</TableCell>
           <TableCell align="center">{row.amount}</TableCell>
           <TableCell align="center">{row.time}</TableCell>
