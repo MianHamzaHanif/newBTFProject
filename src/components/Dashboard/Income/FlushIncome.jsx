@@ -136,7 +136,10 @@ export const FlushIncome = () => {
         }]);
       });
 
+      // Filter once more at the final boundary so a malformed legacy RPC
+      // response can never create an empty/zero table line.
       const combinedRows = [...v1Rows, ...toRows(v2Snapshot, "V2"), ...toRows(v3Snapshot, "V3")]
+        .filter((row) => row.type && Number(row.amount) > 0)
         .sort((a, b) => {
           if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
           if (a.recordIndex !== b.recordIndex) return b.recordIndex - a.recordIndex;
