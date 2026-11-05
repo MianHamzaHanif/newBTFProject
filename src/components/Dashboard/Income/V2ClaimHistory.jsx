@@ -12,6 +12,7 @@ import {
   V2LedgerAddress,
 } from "../../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { getLegacyV2HistoryCutoffTimestamp, isLegacyV2HistoryVisible } from "../../../blockchain/legacyV2HistoryCutoff";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import "../styles/style.css";
 
@@ -79,7 +80,7 @@ async function readV1Income(wallet, incomeType) {
   return { ready: 0n, claimed: records.reduce((total, record) => total + record.amount, 0n), records };
 }
 
-async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddress, lensAddress = "", recordSource }) {
+async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddress, lensAddress = "", recordSource, cutoffTimestamp = null }) {
   const provider = createBscReadProvider();
   const ledger = new ethers.Contract(ledgerAddress, V2IncomeLedgerABI, provider);
   const isFiltered = incomeType !== undefined;
@@ -99,6 +100,9 @@ async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddr
       timestamp: BigInt(record.timestamp ?? record[isFiltered ? 2 : 3] ?? 0n),
     };
   });
+  const visibleRecords = cutoffTimestamp === null
+    ? records
+    : records.filter((record) => isLegacyV2HistoryVisible(record.timestamp, cutoffTimestamp));
   let ready = 0n;
   if (isFiltered) {
     // Ready amount is informational only. A missing/older lens must never
@@ -112,7 +116,7 @@ async function readLedgerIncome(wallet, incomeType, { ledgerAddress, managerAddr
       ready = 0n;
     }
   }
-  return { ready, claimed: records.reduce((total, record) => total + record.amount, 0n), records };
+  return { ready, claimed: records.reduce((total, record) => total + record.amount, 0n), records: visibleRecords };
 }
 
 // A Level ROI claim can contain separate credits for several downline levels
@@ -153,12 +157,14 @@ export default function V2ClaimHistory({ eventName = "", heading = "Claim Histor
     try {
       setLoading(true);
       setMessage("");
+      const cutoffTimestamp = await getLegacyV2HistoryCutoffTimestamp();
       const [v1Result, v2Result, v3Result] = await Promise.allSettled([
         readV1Income(wallet, incomeType),
         readLedgerIncome(wallet, incomeType, {
           ledgerAddress: LegacyV2LedgerAddress,
           managerAddress: LegacyV2PackageManagerAddress,
           recordSource: "v2",
+          cutoffTimestamp,
         }),
         readLedgerIncome(wallet, incomeType, {
           ledgerAddress: V2LedgerAddress,

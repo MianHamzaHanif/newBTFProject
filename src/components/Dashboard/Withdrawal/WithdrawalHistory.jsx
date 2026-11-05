@@ -8,6 +8,7 @@ import LegacyV2IncomeLedgerABI from "../../../blockchain/legacyV2IncomeLedgerABI
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { LegacyV2LedgerAddress, V2LedgerAddress } from "../../../blockchain/address";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { getLegacyV2HistoryCutoffTimestamp, isLegacyV2HistoryVisible } from "../../../blockchain/legacyV2HistoryCutoff";
 
 const READ_BATCH_SIZE = 10;
 
@@ -58,6 +59,7 @@ export const WithdrawalHistory = () => {
         return readInBatches(Number(length), (index) => ledger.getUserWithdrawHistoryAt(walletAddress, index));
       };
 
+      const cutoffTimestamp = await getLegacyV2HistoryCutoffTimestamp();
       const [v1Result, v2Result, v3Result] = await Promise.allSettled([
         v1Referral.getUserWithdrawSummaryRecordsLength(walletAddress)
           .then((length) => readInBatches(Number(length), (index) => v1Referral.getUserWithdrawSummaryRecordAt(walletAddress, index))),
@@ -98,11 +100,15 @@ export const WithdrawalHistory = () => {
           rawTimestamp: timestamp,
         };
       }).filter((row) => row.rawTotal > 0n);
-      const v2Rows = ledgerRows(v2Records, true);
+      const v2AllRows = ledgerRows(v2Records, true);
+      const v2Rows = v2AllRows
+        .filter((row) => isLegacyV2HistoryVisible(row.rawTimestamp, cutoffTimestamp));
       const v3Rows = ledgerRows(v3Records);
 
       setV1Total(formatAmount(v1Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));
-      setV2Total(formatAmount(v2Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));
+      // The card is a lifetime V2 total. The cutoff applies only to rows in
+      // the history table, not to this aggregate balance/history summary.
+      setV2Total(formatAmount(v2AllRows.reduce((sum, row) => sum + row.rawTotal, 0n)));
       setV3Total(formatAmount(v3Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));
       // V1, V2 and V3 histories use independent indexes. Merge them first, then
       // use the actual on-chain timestamp so the newest withdrawal is always

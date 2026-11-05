@@ -7,6 +7,7 @@ import { LegacyV2FlushLedgerAddress, V2FlushLedgerAddress } from "../../../block
 import { BSC_MAINNET } from "../../../blockchain/bscMainnetConfig";
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { getLegacyV2HistoryCutoffTimestamp, isLegacyV2HistoryVisible } from "../../../blockchain/legacyV2HistoryCutoff";
 import "../styles/style.css";
 
 const labels = ["Direct", "Self ROI", "Level ROI", "Power", "Reward"];
@@ -92,6 +93,7 @@ export const FlushIncome = () => {
         );
         return { totals, records };
       };
+      const cutoffTimestamp = await getLegacyV2HistoryCutoffTimestamp();
       const [v1Result, v2Result, v3Result] = await Promise.allSettled([
         readV1FlushSummary(),
         readWithFallback(LegacyV2FlushLedgerAddress),
@@ -138,7 +140,7 @@ export const FlushIncome = () => {
 
       // Filter once more at the final boundary so a malformed legacy RPC
       // response can never create an empty/zero table line.
-      const combinedRows = [...v1Rows, ...toRows(v2Snapshot, "V2"), ...toRows(v3Snapshot, "V3")]
+      const combinedRows = [...v1Rows, ...toRows(v2Snapshot, "V2").filter((row) => isLegacyV2HistoryVisible(row.timestamp, cutoffTimestamp)), ...toRows(v3Snapshot, "V3")]
         .filter((row) => row.type && Number(row.amount) > 0)
         .sort((a, b) => {
           if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
