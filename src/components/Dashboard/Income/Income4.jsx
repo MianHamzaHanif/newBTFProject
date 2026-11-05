@@ -454,7 +454,19 @@ export const Income4 = () => {
       // The card is deliberately sourced from V3's ready-income lens. V1/V2
       // rows are history only; adding them here would show a balance that the
       // active V3 claim function cannot necessarily pay.
-      setDetails({ ...powerDetails, readyAmount: powerReady });
+      // Registry is the canonical rank record. If an older Lens response
+      // reports zero during/after migration, never let it hide a rank that
+      // is already confirmed by the live V3 Registry.
+      const lensActiveLevel = BigInt(powerDetails.activeLevel ?? 0n);
+      const lensAchievedLevel = BigInt(powerDetails.achievedLevel ?? 0n);
+      setDetails({
+        ...powerDetails,
+        activeLevel: lensActiveLevel > 0n ? lensActiveLevel : BigInt(registryAchievedPowerRaw ?? 0n),
+        achievedLevel: lensAchievedLevel > BigInt(registryAchievedPowerRaw ?? 0n)
+          ? lensAchievedLevel
+          : BigInt(registryAchievedPowerRaw ?? 0n),
+        readyAmount: powerReady,
+      });
       setLegacyPower(legacySchedule.set ? {
         originalAchievedAt: legacySchedule.originalAchievedAt,
         nextInstallmentAt: legacySchedule.nextInstallmentAt,
