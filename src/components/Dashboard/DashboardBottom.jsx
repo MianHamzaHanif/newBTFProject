@@ -279,9 +279,17 @@ const DashboardBottom = () => {
           v1LevelOpen,
           v1UserData,
         ] = v1Summary;
+        // Dashboard income cards must use the same V2 visibility boundary as
+        // the history pages. V1 and V3 records remain fully visible.
+        const visibleLegacyIncomeRecords = legacyIncomeRecords.filter((record) =>
+          isLegacyV2HistoryVisible(
+            BigInt(record.timestamp ?? record[3] ?? 0n),
+            legacyV2CutoffTimestamp,
+          ),
+        );
         const totalsByType = { direct: 0n, roi: 0n, power: 0n, reward: 0n };
         let totalEarned = 0n;
-        for (const record of [...legacyIncomeRecords, ...incomeRecords]) {
+        for (const record of [...visibleLegacyIncomeRecords, ...incomeRecords]) {
           const incomeType = Number(record.incomeType ?? record[0]);
           const amount = BigInt(record.amount ?? record[2]);
           totalEarned += amount;
