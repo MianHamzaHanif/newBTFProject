@@ -377,6 +377,7 @@ export const Income4 = () => {
       let nextThreshold = 0n;
       let nextQualified = 0n;
       if (nextPowerLevel) {
+        try {
         // V3 normally owns the migrated leg value. Some historic accounts,
         // however, have an incomplete V3 leg snapshot even though their V2
         // leg was valid. In that case reconstruct the exact V1 + V2 value
@@ -443,6 +444,12 @@ export const Income4 = () => {
           return business > perLegCap ? perLegCap : business;
         });
         nextQualified = legQualified.reduce((total, amount) => total + amount, 0n);
+        } catch {
+          // Next-rank business is informational only. A legacy source timeout
+          // must not erase the user's already-confirmed V3 Power state.
+          nextThreshold = 0n;
+          nextQualified = 0n;
+        }
       }
       // The card is deliberately sourced from V3's ready-income lens. V1/V2
       // rows are history only; adding them here would show a balance that the
