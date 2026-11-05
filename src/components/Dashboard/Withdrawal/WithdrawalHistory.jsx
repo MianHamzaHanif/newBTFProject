@@ -106,9 +106,9 @@ export const WithdrawalHistory = () => {
       const v3Rows = ledgerRows(v3Records);
 
       setV1Total(formatAmount(v1Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));
-      // The card is a lifetime V2 total. The cutoff applies only to rows in
-      // the history table, not to this aggregate balance/history summary.
-      setV2Total(formatAmount(v2AllRows.reduce((sum, row) => sum + row.rawTotal, 0n)));
+      // Keep the V2 summary aligned with the visible V2 history: anything
+      // written after the legacy cutoff is excluded from both places.
+      setV2Total(formatAmount(v2Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));
       setV3Total(formatAmount(v3Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));
       // V1, V2 and V3 histories use independent indexes. Merge them first, then
       // use the actual on-chain timestamp so the newest withdrawal is always

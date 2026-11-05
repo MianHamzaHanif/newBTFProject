@@ -102,9 +102,21 @@ export const FlushIncome = () => {
       const v1Snapshot = v1Result.status === "fulfilled" ? v1Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
       const v2Snapshot = v2Result.status === "fulfilled" ? v2Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
       const v3Snapshot = v3Result.status === "fulfilled" ? v3Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
-      // Summary cards are lifetime totals. V1 has only aggregate withdraw
-      // summary records; V2/V3 additionally provide the itemized table.
-      setSummary(v1Snapshot.totals.map((total, index) => formatAmount(total + v2Snapshot.totals[index] + v3Snapshot.totals[index])));
+      // V2 values after the historical cutoff must not appear in either the
+      // table or the summary cards. V1 and V3 remain full lifetime totals.
+      const visibleV2Totals = v2Snapshot.records.reduce((totals, { record }) => {
+        const type = Number(record.incomeType);
+        const timestamp = BigInt(record.timestamp ?? 0n);
+        const amount = BigInt(record.amount ?? 0n);
+        if (
+          Number.isInteger(type) && type >= 0 && type < labels.length && amount > 0n
+          && isLegacyV2HistoryVisible(timestamp, cutoffTimestamp)
+        ) {
+          totals[type] += amount;
+        }
+        return totals;
+      }, [0n, 0n, 0n, 0n, 0n]);
+      setSummary(v1Snapshot.totals.map((total, index) => formatAmount(total + visibleV2Totals[index] + v3Snapshot.totals[index])));
       const toRows = (snapshot, source) => snapshot.records.flatMap(({ record, recordIndex }) => {
         const typeOrder = Number(record.incomeType);
         const amount = BigInt(record.amount ?? 0n);
