@@ -142,6 +142,7 @@ const App = () => {
         <Route path="/income/v2-claim-history" element={<V2ClaimHistory />} />
         <Route path="/income/v2-claim" element={<V2ClaimIncome />} />
         <Route path="/withdrawal" element={<Withdrawal />} />
+        <Route path="/withdrawal/v1" element={<Withdrawal />} />
         <Route path="/withdrawal/v2" element={<Withdrawal />} />
         <Route path="/withdrawal-history" element={<WithdrawalHistory />} />
         <Route path="/lock" element={<Lock />} />
