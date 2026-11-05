@@ -74,15 +74,21 @@ export const PowerIncomeWithdraw = () => {
         Array.from({ length: directCount }, (_, index) => registry.getLevelUserAt(user, 0, index)),
       );
       const directRows = await Promise.all(directs.map(async (direct, index) => {
-        const [selfBusiness, teamBusiness, legBusiness] = await Promise.all([
+        const [selfBusiness, teamBusiness, legBusiness, hasEverPackage, legacyDirectCounted] = await Promise.all([
           registry.legSelfBusiness(user, direct),
           registry.legTeamBusiness(user, direct),
           registry.legBusiness(user, direct),
+          registry.hasEverPackage(direct),
+          registry.legacyDirectCounted(direct),
         ]);
-        const counted = nextLevel
+        // Keep this identical to BTFReferralRegistry._syncNextPowerReward:
+        // a direct without its own/legacy qualified package never contributes
+        // its team leg to Power or Reward qualification.
+        const eligible = hasEverPackage || legacyDirectCounted;
+        const counted = eligible && nextLevel
           ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
           : 0n;
-        const rewardCounted = nextReward
+        const rewardCounted = eligible && nextReward
           ? (legBusiness > rewardCapPerLeg ? rewardCapPerLeg : legBusiness)
           : 0n;
         return {

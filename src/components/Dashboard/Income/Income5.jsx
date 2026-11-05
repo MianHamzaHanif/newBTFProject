@@ -65,12 +65,18 @@ export const Income5 = () => {
         Array.from({ length: directCount }, (_, index) => registry.getLevelUserAt(user, 0, index)),
       );
       const directRows = await Promise.all(directs.map(async (direct, index) => {
-        const [selfBusiness, teamBusiness, legBusiness] = await Promise.all([
+        const [selfBusiness, teamBusiness, legBusiness, hasEverPackage, legacyDirectCounted] = await Promise.all([
           registry.legSelfBusiness(user, direct),
           registry.legTeamBusiness(user, direct),
           registry.legBusiness(user, direct),
+          registry.hasEverPackage(direct),
+          registry.legacyDirectCounted(direct),
         ]);
-        const counted = nextIndex
+        // Match BTFReferralRegistry._syncNextPowerReward exactly.  An
+        // unqualified direct's team business is visible in the detail table,
+        // but must not be included in qualified Reward business.
+        const eligible = hasEverPackage || legacyDirectCounted;
+        const counted = eligible && nextIndex
           ? (legBusiness > capPerLeg ? capPerLeg : legBusiness)
           : 0n;
         return { sno: index + 1, direct: shortAddress(direct), selfBusiness: formatUsdt(selfBusiness), teamBusiness: formatUsdt(teamBusiness), business: formatUsdt(legBusiness), counted: formatUsdt(counted), countedRaw: counted };
