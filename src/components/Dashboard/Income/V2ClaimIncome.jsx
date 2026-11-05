@@ -4,10 +4,12 @@ import { ethers } from "ethers";
 import CustomTable from "../CommonComponents/CustomTable";
 import V2PackageManagerABI from "../../../blockchain/v2PackageManagerABI";
 import V2IncomeLedgerABI from "../../../blockchain/v2IncomeLedgerABI";
+import LegacyV2IncomeLedgerABI from "../../../blockchain/legacyV2IncomeLedgerABI";
 import TestUsdtABI from "../../../blockchain/testUsdtABI";
 import {
   HasTestUsdtFaucet,
   IncomeReadyLensAddress,
+  LegacyV2LedgerAddress,
   PackageManagerAddress,
   TokenAddress,
   V2LedgerAddress,
@@ -107,11 +109,38 @@ export default function V2ClaimIncome() {
         readProvider,
       );
       const incomeLens = new ethers.Contract(IncomeReadyLensAddress, V2PackageManagerABI, readProvider);
-      const ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
+      const v3Ledger = new ethers.Contract(V2LedgerAddress, V2IncomeLedgerABI, readProvider);
+      const v2Ledger = new ethers.Contract(
+        LegacyV2LedgerAddress,
+        LegacyV2IncomeLedgerABI,
+        readProvider,
+      );
+
+      // "Already Claimed" is historical data, not the currently claimable
+      // V3 balance.  Read every legacy V2 record once, group it by income
+      // type, then add the matching V3 ledger history below.
+      const v2ClaimedByType = Array.from({ length: claimActions.length }, () => 0n);
+      try {
+        const v2HistoryLength = Number(await v2Ledger.getUserIncomeHistoryLength(wallet));
+        const v2Records = await Promise.all(
+          Array.from({ length: v2HistoryLength }, (_, historyIndex) =>
+            v2Ledger.getUserIncomeHistoryAt(wallet, historyIndex)
+          )
+        );
+        v2Records.forEach((record) => {
+          const incomeType = Number(record.incomeType ?? record[0] ?? -1);
+          if (incomeType >= 0 && incomeType < v2ClaimedByType.length) {
+            v2ClaimedByType[incomeType] += BigInt(record.amount ?? record[2] ?? 0n);
+          }
+        });
+      } catch {
+        // A legacy V2 read must not hide the user's V3 claimed history.
+      }
+
       const nextRows = await Promise.all(
         claimActions.map(async (action, index) => {
           let currentAmount = 0n;
-          let claimedAmount = 0n;
+          let claimedAmount = v2ClaimedByType[action.incomeType];
 
           if (action.incomeType === 1 || action.incomeType === 2) {
             // Self/Level ROI are settled lazily by their claim methods.  The
@@ -144,10 +173,10 @@ export default function V2ClaimIncome() {
 
           try {
             const length = Number(
-              await ledger.getUserIncomeHistoryLengthByType(wallet, action.incomeType)
+              await v3Ledger.getUserIncomeHistoryLengthByType(wallet, action.incomeType)
             );
             for (let historyIndex = 0; historyIndex < length; historyIndex += 1) {
-              const record = await ledger.getUserIncomeHistoryAtByType(
+              const record = await v3Ledger.getUserIncomeHistoryAtByType(
                 wallet,
                 action.incomeType,
                 historyIndex
@@ -155,7 +184,7 @@ export default function V2ClaimIncome() {
               claimedAmount += record.amount;
             }
           } catch {
-            claimedAmount = 0n;
+            // Keep the V2 sum if a V3 history read is temporarily unavailable.
           }
 
           return {
