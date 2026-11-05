@@ -5,11 +5,16 @@ import CustomTable from "../CommonComponents/CustomTable";
 import V2FlushLedgerABI from "../../../blockchain/v2FlushLedgerABI";
 import { LegacyV2FlushLedgerAddress, V2FlushLedgerAddress } from "../../../blockchain/address";
 import { BSC_MAINNET } from "../../../blockchain/bscMainnetConfig";
+import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
 import "../styles/style.css";
 
 const labels = ["Direct", "Self ROI", "Level ROI", "Power", "Reward"];
 const READ_BATCH_SIZE = 10;
+const V1_WITHDRAW_FLUSH_ABI = [
+  "function getUserWithdrawSummaryRecordsLength(address user) view returns(uint256)",
+  "function getUserWithdrawSummaryFlushAt(address user,uint256 index) view returns(uint256 directFlushed,uint256 selfRoiFlushed,uint256 levelRoiFlushed,uint256 powerFlushed,uint256 rewardFlushed)",
+];
 
 const formatAmount = (value) => {
   try { return Number(ethers.formatEther(value ?? 0n)).toFixed(4); } catch { return "0.0000"; }
@@ -65,13 +70,31 @@ export const FlushIncome = () => {
         try { return await readFlushLedger(ledgerAddress, createBscReadProvider()); }
         catch { return readFlushLedger(ledgerAddress, createBackupReadProvider()); }
       };
-      const [v2Result, v3Result] = await Promise.allSettled([
+      const readV1FlushTotals = async () => {
+        const provider = new ethers.JsonRpcProvider(
+          V1_MAINNET.rpcUrl,
+          V1_MAINNET.chainId,
+          { staticNetwork: true, batchMaxCount: 1 },
+        );
+        const referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_WITHDRAW_FLUSH_ABI, provider);
+        const length = Number(await referral.getUserWithdrawSummaryRecordsLength(user));
+        const records = await readInBatches(length, (index) => referral.getUserWithdrawSummaryFlushAt(user, index));
+        return records.reduce(
+          (totals, record) => totals.map((total, index) => total + BigInt(record[index] ?? 0n)),
+          [0n, 0n, 0n, 0n, 0n],
+        );
+      };
+      const [v1Result, v2Result, v3Result] = await Promise.allSettled([
+        readV1FlushTotals(),
         readWithFallback(LegacyV2FlushLedgerAddress),
         readWithFallback(V2FlushLedgerAddress),
       ]);
+      const v1Totals = v1Result.status === "fulfilled" ? v1Result.value : [0n, 0n, 0n, 0n, 0n];
       const v2Snapshot = v2Result.status === "fulfilled" ? v2Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
       const v3Snapshot = v3Result.status === "fulfilled" ? v3Result.value : { totals: [0n, 0n, 0n, 0n, 0n], records: [] };
-      setSummary(v2Snapshot.totals.map((total, index) => formatAmount(total + v3Snapshot.totals[index])));
+      // Summary cards are lifetime totals. V1 has only aggregate withdraw
+      // summary records; V2/V3 additionally provide the itemized table.
+      setSummary(v1Totals.map((total, index) => formatAmount(total + v2Snapshot.totals[index] + v3Snapshot.totals[index])));
       const toRows = (snapshot) => snapshot.records.map(({ record, recordIndex }) => {
         const typeOrder = Number(record.incomeType);
         const timestamp = Number(record.timestamp ?? 0n);
@@ -94,7 +117,7 @@ export const FlushIncome = () => {
         .map((row, index) => ({ ...row, sno: index + 1 }));
 
       setRows(combinedRows);
-      if (v2Result.status === "rejected" || v3Result.status === "rejected") {
+      if (v1Result.status === "rejected" || v2Result.status === "rejected" || v3Result.status === "rejected") {
         setMessage("Some Flush history data could not be loaded. Please refresh.");
       }
     } catch (error) {
