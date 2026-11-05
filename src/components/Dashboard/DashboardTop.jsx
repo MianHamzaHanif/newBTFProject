@@ -992,12 +992,13 @@ const DashboardTop = () => {
         setBuyStatus("Buy transaction is pending or failed. Check wallet Activity, then try Buy again.");
         return;
       }
-      setBuyStatus("Package activated successfully. Refreshing dashboard...");
+      setBuyStatus("Package activated successfully. Dashboard updated.");
       await Promise.all([loadPlanActivity(), loadDayCycle(), loadPackageWarnings()]);
       window.dispatchEvent(new Event("btf:v2-data-changed"));
-      // Other dashboard cards use independent reads. A complete reload after
-      // the confirmed receipt ensures every card uses the new chain state.
-      window.setTimeout(() => window.location.reload(), 700);
+      // Keep the user on the current dashboard route. A full browser reload
+      // can re-run the registration guard before the wallet/RPC has returned
+      // the just-mined package state and incorrectly send the user to Login.
+      // Dashboard cards listen for btf:v2-data-changed and refresh in place.
 
     } catch (error) {
       console.error("Buy package failed:", error);

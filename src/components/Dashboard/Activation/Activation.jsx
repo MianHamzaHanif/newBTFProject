@@ -110,7 +110,7 @@ export const Activation = () => {
 
   return <div className="page-container"><h1>Activation Package</h1>
     {summary && <div className="withdrawal-grid mb-4">
-      <div className="withdrawal-card"><p className="withdrawal-card-title">Total Amount Receiving Self ROI</p><h4 className="withdrawal-card-value">{formatAmount(summary.totalRoiPackageAmount)}</h4></div>
+      <div className="withdrawal-card"><p className="withdrawal-card-title">Total Investment</p><h4 className="withdrawal-card-value">{formatAmount(summary.totalRoiPackageAmount)}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Active Packages Total</p><h4 className="withdrawal-card-value">{formatAmount(summary.activePackagesAmount)}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI Claimable</p><h4 className="withdrawal-card-value">{formatAmount(summary.pendingRoi)}</h4></div>
       <div className="withdrawal-card"><p className="withdrawal-card-title">Self ROI 3x Limit</p><h4 className="withdrawal-card-value">{formatAmount(summary.roiMaximum)}</h4></div>
