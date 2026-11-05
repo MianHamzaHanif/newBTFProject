@@ -191,47 +191,53 @@ export const Income4 = () => {
       );
 
       const [legacySchedule, legacyPreview, recovery] = await Promise.all([
-        checkpoint.getPowerSchedule(user),
-        checkpoint.previewPowerClaimable(user),
+        checkpoint.getPowerSchedule(user).catch(() => ({
+          originalAchievedAt: 0n, nextInstallmentAt: 0n, paidInstallments: 0n,
+          releasedAfterCutover: 0n, unpaidAmount: 0n, level: 0n, set: false,
+        })),
+        checkpoint.previewPowerClaimable(user).catch(() => [0n, 0n]),
         // This selector becomes available when the Rank-facet proposal is
         // executed. Keep the page compatible with the previous facet until
         // then; an unsupported selector means no user has been finalized yet.
         manager.getPowerIncomeRecovery(user).catch(() => null),
       ]);
-      // V1 is read independently. For a rank finalized in V1, this live V1
-      // record owns the baseline row while only higher ranks come from V2.
-      const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, provider);
-      const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, provider);
-      const [v1Level, v1ActivatedAt, v1ClaimedCount, v1Claimable, v1TotalClaimed, v1LastClaimAt, v1NextPayoutAt, v1Day] = await Promise.all([
-        v1PowerModule.activePowerLevel(user),
-        v1PowerModule.powerLevelStartedAt(user),
-        v1PowerModule.powerClaimedCount(user),
-        v1PowerModule.rawClaimable(user),
-        v1Manager.totalPowerIncomeClaimed(user),
-        v1Manager.powerLastClaimAt(user),
-        v1Manager.powerNextPayoutAt(user),
-        v1Manager.oneDay(),
-      ]);
-      const v1HistoryLength = Number(await v1Manager.getPowerHistoryLength(user));
-      const v1History = await Promise.all(
-        Array.from({ length: v1HistoryLength }, (_, index) => v1Manager.getPowerHistoryAt(user, index)),
-      );
-      const v1Referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_WITHDRAW_FLUSH_ABI, provider);
-      const v1FlushHistoryLength = Number(await v1Referral.getUserWithdrawSummaryRecordsLength(user).catch(() => 0n));
-      const v1FlushRecords = await Promise.all(
-        Array.from({ length: v1FlushHistoryLength }, (_, index) =>
-          v1Referral.getUserWithdrawSummaryFlushAt(user, index).catch(() => null),
-        ),
-      );
+      // V1 is historical fallback only. Its RPC/read error must never hide
+      // the live V3 Power rank or V3 claimable amount.
+      let v1Level = 0n;
+      let v1ActivatedAt = 0n;
+      let v1ClaimedCount = 0n;
+      let v1Claimable = 0n;
+      let v1TotalClaimed = 0n;
+      let v1LastClaimAt = 0n;
+      let v1NextPayoutAt = 0n;
+      let v1Day = 0n;
+      let v1History = [];
+      let v1FlushRecords = [];
+      let v1CycleHistory = [];
+      try {
+        const v1Manager = new ethers.Contract(V1_MAINNET.packageManager, V1_POWER_MANAGER_ABI, provider);
+        const v1PowerModule = new ethers.Contract(await v1Manager.powerIncomeModule(), V1_POWER_MODULE_ABI, provider);
+        [v1Level, v1ActivatedAt, v1ClaimedCount, v1Claimable, v1TotalClaimed, v1LastClaimAt, v1NextPayoutAt, v1Day] = await Promise.all([
+          v1PowerModule.activePowerLevel(user), v1PowerModule.powerLevelStartedAt(user),
+          v1PowerModule.powerClaimedCount(user), v1PowerModule.rawClaimable(user),
+          v1Manager.totalPowerIncomeClaimed(user), v1Manager.powerLastClaimAt(user),
+          v1Manager.powerNextPayoutAt(user), v1Manager.oneDay(),
+        ]);
+        const v1HistoryLength = Number(await v1Manager.getPowerHistoryLength(user));
+        v1History = await Promise.all(Array.from({ length: v1HistoryLength }, (_, index) => v1Manager.getPowerHistoryAt(user, index)));
+        const v1Referral = new ethers.Contract(V1_MAINNET.referralNetwork, V1_WITHDRAW_FLUSH_ABI, provider);
+        const v1FlushHistoryLength = Number(await v1Referral.getUserWithdrawSummaryRecordsLength(user).catch(() => 0n));
+        v1FlushRecords = await Promise.all(Array.from({ length: v1FlushHistoryLength }, (_, index) =>
+          v1Referral.getUserWithdrawSummaryFlushAt(user, index).catch(() => null)));
+        const v1CycleHistoryLength = Number(await v1PowerModule.getPowerCycleHistoryLength(user));
+        v1CycleHistory = await Promise.all(Array.from({ length: v1CycleHistoryLength }, (_, index) =>
+          v1PowerModule.getPowerCycleHistoryAt(user, index)));
+      } catch {
+        // V3 data above remains authoritative and renderable.
+      }
       // `getPowerHistoryAt` carries a payout/next-payout timestamp, not a
       // rank-achievement timestamp. The Power module's cycle history is the
       // authoritative source for each rank's actual started/achieved time.
-      const v1CycleHistoryLength = Number(await v1PowerModule.getPowerCycleHistoryLength(user));
-      const v1CycleHistory = await Promise.all(
-        Array.from({ length: v1CycleHistoryLength }, (_, index) =>
-          v1PowerModule.getPowerCycleHistoryAt(user, index),
-        ),
-      );
       const v1ActivatedAtByLevel = {};
       for (const cycle of v1CycleHistory) {
         const level = Number(cycle.level ?? cycle[0] ?? 0n);

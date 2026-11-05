@@ -51,8 +51,7 @@ export const Income6 = () => {
     { id: "achievedAt", label: "Achieved At", sortable: true }, { id: "totalRewardAmount", label: "Total Reward", sortable: true },
     { id: "monthlyRewardAmount", label: "Per Installment", sortable: true }, { id: "installmentCount", label: "Released / Total", sortable: true },
     { id: "releasedAmount", label: "Released Value", sortable: true }, { id: "claimedCycles", label: "Claimed Cycles", sortable: true }, { id: "claimedAmount", label: "Already Claimed", sortable: true },
-    { id: "claimableAmount", label: "Currently Claimable", sortable: true }, { id: "remainingAmount", label: "Remaining Schedule", sortable: true },
-    { id: "nextPayoutAt", label: "Next Payout At", sortable: true }, { id: "lastClaimAt", label: "Last Claim Time", sortable: true },
+    { id: "claimableAmount", label: "Currently Claimable", sortable: true },
   ];
 
   useEffect(() => {
@@ -266,7 +265,7 @@ export const Income6 = () => {
   return <div className="page-container"><div className="d-flex justify-content-between align-items-center mb-3"><h1 className="mb-0">Reward Details</h1><button className="btn btn-primary" onClick={() => setRefreshKey((key) => key + 1)} disabled={isLoading}>{isLoading ? "Loading..." : "Refresh"}</button></div><div className="table-wrapper"><div className="table-card ">{topCards}
     {isLoading && <p className="team-loading">Loading reward details...</p>}
     <div style={{ marginTop: "24px" }}><CustomTable columns={columns} rows={rows} renderRow={(row) => <>
-      <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.rewardLevel}</TableCell><TableCell align="center" className="team-time-cell">{row.achievedAt}</TableCell><TableCell align="center">{row.totalRewardAmount}</TableCell><TableCell align="center">{row.monthlyRewardAmount}</TableCell><TableCell align="center">{row.installmentCount}</TableCell><TableCell align="center">{row.releasedAmount}</TableCell><TableCell align="center">{row.claimedCycles}</TableCell><TableCell align="center">{row.claimedAmount}</TableCell><TableCell align="center">{row.claimableAmount}</TableCell><TableCell align="center">{row.remainingAmount}</TableCell><TableCell align="center" className="team-time-cell">{row.nextPayoutAt}</TableCell><TableCell align="center" className="team-time-cell">{row.lastClaimAt}</TableCell>
+      <TableCell align="center">{row.sno}</TableCell><TableCell align="center">{row.rewardLevel}</TableCell><TableCell align="center" className="team-time-cell">{row.achievedAt}</TableCell><TableCell align="center">{row.totalRewardAmount}</TableCell><TableCell align="center">{row.monthlyRewardAmount}</TableCell><TableCell align="center">{row.installmentCount}</TableCell><TableCell align="center">{row.releasedAmount}</TableCell><TableCell align="center">{row.claimedCycles}</TableCell><TableCell align="center">{row.claimedAmount}</TableCell><TableCell align="center">{row.claimableAmount}</TableCell>
     </>} /></div>
   </div></div></div>;
 };
