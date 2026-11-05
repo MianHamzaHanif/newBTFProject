@@ -298,7 +298,12 @@ const DashboardBottom = () => {
           else if (incomeType === 3) totalsByType.power += amount;
           else if (incomeType === 4) totalsByType.reward += amount;
         }
-        const v3Withdrawn = withdrawRecords.reduce((total, record) => total + BigInt(record.netAmount ?? record[2] ?? 0n), 0n);
+        const v3Withdrawn = withdrawRecords.reduce((total, record) => {
+          const timestamp = BigInt(record.timestamp ?? record[3] ?? 0n);
+          return isLegacyV2HistoryVisible(timestamp, legacyV2CutoffTimestamp)
+            ? total + BigInt(record.netAmount ?? record[2] ?? 0n)
+            : total;
+        }, 0n);
         const legacyV2Withdrawn = legacyWithdrawRecords.reduce((total, record) => {
           const timestamp = BigInt(record.timestamp ?? record[1] ?? 0n);
           return isLegacyV2HistoryVisible(timestamp, legacyV2CutoffTimestamp)

@@ -103,6 +103,8 @@ export const WithdrawalHistory = () => {
       const v2AllRows = ledgerRows(v2Records, true);
       const v2Rows = v2AllRows
         .filter((row) => isLegacyV2HistoryVisible(row.rawTimestamp, cutoffTimestamp));
+      // V3 history remains visible in the table. The cutoff is applied to
+      // aggregate withdrawal boxes/dashboard formulas only.
       const v3Rows = ledgerRows(v3Records);
 
       setV1Total(formatAmount(v1Rows.reduce((sum, row) => sum + row.rawTotal, 0n)));

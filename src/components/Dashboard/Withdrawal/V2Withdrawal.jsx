@@ -8,6 +8,7 @@ import { LegacyV2LedgerAddress, PackageManagerAddress, ReferralNetworkAddress, S
 import { V1_MAINNET } from "../../../blockchain/v1MainnetConfig";
 import { WALLET_ADD_CHAIN_PARAMS } from "../../../blockchain/bscMainnetConfig";
 import { createBscReadProvider, getReadWalletAddress } from "../../../blockchain/readProvider";
+import { getLegacyV2HistoryCutoffTimestamp, isLegacyV2HistoryVisible } from "../../../blockchain/legacyV2HistoryCutoff";
 import { hasImportedLegacyPackage } from "../../../blockchain/legacyPackageImportState";
 import { canAccessMigration } from "../../../blockchain/migrationAccess";
 
@@ -296,7 +297,13 @@ export default function V2Withdrawal() {
           const entries = await Promise.all(
             Array.from({ length: Number(length) }, (_, index) => ledger.getUserWithdrawHistoryAt(user, index)),
           );
-          return entries.reduce((sum, item) => sum + (item.netAmount ?? item[2] ?? 0n), 0n);
+          const cutoffTimestamp = await getLegacyV2HistoryCutoffTimestamp();
+          return entries.reduce((sum, item) => {
+            const timestamp = BigInt(item.timestamp ?? item[3] ?? 0n);
+            return isLegacyV2HistoryVisible(timestamp, cutoffTimestamp)
+              ? sum + BigInt(item.netAmount ?? item[2] ?? 0n)
+              : sum;
+          }, 0n);
         })
         .catch(() => 0n),
         legacyLedger.getUserWithdrawHistoryLength(user)
@@ -304,7 +311,13 @@ export default function V2Withdrawal() {
             const entries = await Promise.all(
               Array.from({ length: Number(length) }, (_, index) => legacyLedger.getUserWithdrawHistoryAt(user, index)),
             );
-            return entries.reduce((sum, item) => sum + BigInt(item.amount ?? item[0] ?? 0n), 0n);
+            const cutoffTimestamp = await getLegacyV2HistoryCutoffTimestamp();
+            return entries.reduce((sum, item) => {
+              const timestamp = BigInt(item.timestamp ?? item[1] ?? 0n);
+              return isLegacyV2HistoryVisible(timestamp, cutoffTimestamp)
+                ? sum + BigInt(item.amount ?? item[0] ?? 0n)
+                : sum;
+            }, 0n);
           })
           .catch(() => 0n),
       ]);

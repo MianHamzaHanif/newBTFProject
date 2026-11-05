@@ -276,9 +276,12 @@ const DashboardTop = () => {
         }, 0n);
         // V3 retains the gross amount explicitly, so no fee reconstruction
         // is needed for newly-created withdrawal records.
-        const v3GrossWithdrawn = v3Withdrawals.reduce(
-          (total, record) => total + BigInt(record?.grossAmount ?? record?.[0] ?? 0n), 0n,
-        );
+        const v3GrossWithdrawn = v3Withdrawals.reduce((total, record) => {
+          const timestamp = BigInt(record?.timestamp ?? record?.[3] ?? 0n);
+          return record && isLegacyV2HistoryVisible(timestamp, legacyV2CutoffTimestamp)
+            ? total + BigInt(record.grossAmount ?? record[0] ?? 0n)
+            : total;
+        }, 0n);
         const totalWithdrawn = grossFromNet(v1NetWithdrawn)
           + grossFromNet(legacyNetWithdrawn)
           + v3GrossWithdrawn;
