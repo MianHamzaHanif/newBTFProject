@@ -459,12 +459,25 @@ export const Income4 = () => {
       // is already confirmed by the live V3 Registry.
       const lensActiveLevel = BigInt(powerDetails.activeLevel ?? 0n);
       const lensAchievedLevel = BigInt(powerDetails.achievedLevel ?? 0n);
+      // Ethers `Result` named properties are not enumerable, so spreading
+      // `powerDetails` loses fields such as `lastClaimAt` and
+      // `nextPayoutAt`. Copy every field explicitly for the UI state.
       setDetails({
-        ...powerDetails,
         activeLevel: lensActiveLevel > 0n ? lensActiveLevel : BigInt(registryAchievedPowerRaw ?? 0n),
         achievedLevel: lensAchievedLevel > BigInt(registryAchievedPowerRaw ?? 0n)
           ? lensAchievedLevel
           : BigInt(registryAchievedPowerRaw ?? 0n),
+        activatedAt: BigInt(powerDetails.activatedAt ?? 0n),
+        releasedCount: BigInt(powerDetails.releasedCount ?? 0n),
+        claimedCount: BigInt(powerDetails.claimedCount ?? 0n),
+        claimableAmount: BigInt(powerDetails.claimableAmount ?? 0n),
+        totalClaimed: BigInt(powerDetails.totalClaimed ?? 0n),
+        lastClaimAt: BigInt(powerDetails.lastClaimAt ?? 0n),
+        nextLevel: BigInt(powerDetails.nextLevel ?? 0n),
+        nextThreshold: BigInt(powerDetails.nextThreshold ?? 0n),
+        nextQualifiedBusiness: BigInt(powerDetails.nextQualifiedBusiness ?? 0n),
+        nextRequiredBusiness: BigInt(powerDetails.nextRequiredBusiness ?? 0n),
+        nextPayoutAt: BigInt(powerDetails.nextPayoutAt ?? 0n),
         readyAmount: powerReady,
       });
       setLegacyPower(legacySchedule.set ? {
