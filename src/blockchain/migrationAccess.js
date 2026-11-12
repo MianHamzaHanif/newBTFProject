@@ -5,9 +5,7 @@ import { createBscReadProvider } from "./readProvider";
 // Migration screens are an operational admin surface.  Keep this check tied
 // to the central V2 Registry so every UI entry point uses the same authority.
 const REGISTRY_ACCESS_ABI = [
-  "function owner() view returns(address)",
-  "function rootAddress() view returns(address)",
-  "function migrationOperator(address) view returns(bool)",
+  "function isMigrationAuthority(address) view returns(bool)",
 ];
 
 // Confirmed migrated-wallet viewer. This wallet may enter the dashboard and
@@ -33,27 +31,22 @@ async function readAccess(address) {
     REGISTRY_ACCESS_ABI,
     createBscReadProvider(),
   );
-  const [owner, root, isMigrationOperator] = await Promise.all([
-    registry.owner(),
-    registry.rootAddress(),
-    registry.migrationOperator(address),
-  ]);
+  const isMigrationOperator = await registry.isMigrationAuthority(address);
   const wallet = address.toLowerCase();
   return {
-    isOwner: owner.toLowerCase() === wallet,
-    isRoot: root.toLowerCase() === wallet,
+    isOwner: false,
+    isRoot: false,
     isMigrationOperator,
     isMigrationViewer: MIGRATION_VIEWER_ADDRESSES.has(wallet),
   };
 }
 
-// The sensitive Migration Data tab is only for the Registry owner and the
-// explicitly authorised migration wallet. Root may use the normal dashboard,
-// but cannot open the migration operations surface merely by being root.
+// Migration actions are visible only to the Registry's currently allow-listed
+// migration wallet. The DAO can grant/revoke that access on-chain.
 export async function canAccessMigration(address) {
   try {
     const access = await readAccess(address);
-    return access.isOwner || access.isMigrationOperator || access.isMigrationViewer;
+    return access.isMigrationOperator || access.isMigrationViewer;
   } catch {
     // Do not expose the migration interface when the authority cannot be read.
     return false;
@@ -65,7 +58,7 @@ export async function canAccessMigration(address) {
 export async function canAccessDashboardWithoutRegistration(address) {
   try {
     const access = await readAccess(address);
-    return access.isOwner || access.isRoot || access.isMigrationOperator || access.isMigrationViewer;
+    return access.isMigrationOperator || access.isMigrationViewer;
   } catch {
     return false;
   }

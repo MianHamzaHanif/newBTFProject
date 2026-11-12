@@ -17,6 +17,7 @@ export const V2DaoAddress = configuredAddress(import.meta.env.VITE_BTF_V3_DAO_AD
 export const V2FlushLedgerAddress = configuredAddress(import.meta.env.VITE_BTF_V3_FLUSH_LEDGER_ADDRESS, "0xC56F1D63DAB0D19d6Ea669fcFf64f5C9F6f98c63");
 export const IncomeReadyLensAddress = configuredAddress(import.meta.env.VITE_BTF_V3_INCOME_READY_LENS_ADDRESS, "0xC2794b78595E763a619ced510bb78e5840B02c05");
 export const PackageMigrationSourceAddress = configuredAddress(import.meta.env.VITE_BTF_V3_PACKAGE_MIGRATION_SOURCE_ADDRESS, "0x2B35e572036e8EEe045563B21468BFc686e6fC48");
+export const StructureMigratorAddress = configuredAddress(import.meta.env.VITE_BTF_V3_STRUCTURE_MIGRATOR_ADDRESS, "0x80F08A9338A4F4d3995e127439C832C79014d3C8");
 export const V2DeploymentBlock = import.meta.env.VITE_BTF_V3_DEPLOYMENT_BLOCK || "0";
 
 // Legacy source deployments: use only for V1/V2 history and migration reads.

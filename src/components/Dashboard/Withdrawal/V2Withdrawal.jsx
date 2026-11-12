@@ -85,7 +85,6 @@ const REGISTRY_VOTING_ABI = [
   "function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)",
 ];
 const DAO_VOTE_FOR = 1;
-const DAO_VOTING_PROPOSAL_IDS = [23n];
 
 const ensureBscMainnet = async () => {
   const currentChain = await window.ethereum.request({ method: "eth_chainId" });
@@ -360,9 +359,22 @@ export default function V2Withdrawal() {
   );
   const showDaoOnly = location.pathname === "/dao-voting";
   const showV2 = !showV1 && !showDaoOnly;
-  const availableDaoProposalIds = DAO_VOTING_PROPOSAL_IDS.filter((proposalId) =>
-    daoVoting.proposals.some((proposal) => proposal.id === proposalId && !proposal.hasVoted),
-  );
+  const availableDaoProposalIds = daoVoting.proposals
+    .filter((proposal) => !proposal.hasVoted)
+    .map((proposal) => proposal.id);
+
+  useEffect(() => {
+    const requestedId = new URLSearchParams(location.search).get("proposalId");
+    if (!requestedId) return;
+    try {
+      const proposalId = BigInt(requestedId);
+      if (availableDaoProposalIds.some((id) => id === proposalId)) {
+        setSelectedDaoProposalId(proposalId);
+      }
+    } catch {
+      // Ignore a malformed URL; the voter can still select a listed proposal.
+    }
+  }, [location.search, daoVoting.proposals]);
   const v1TotalClaimed = BigInt(v1Overview?.directClaimed ?? 0n)
     + BigInt(v1Overview?.selfClaimed ?? 0n)
     + BigInt(v1Overview?.levelClaimed ?? 0n)
@@ -549,7 +561,7 @@ export default function V2Withdrawal() {
       </div>
       <div className="withdraw-action-wrap">
         <button className="custom-button withdraw-btn" onClick={withdraw} disabled={WITHDRAWALS_PAUSED || withdrawing || pending < minimumWithdraw}>
-          {WITHDRAWALS_PAUSED ? "Withdrawal Paused" : withdrawing ? "Withdrawing..." : "Withdraw V3"}
+          {WITHDRAWALS_PAUSED ? "Withdrawal Paused" : withdrawing ? "Withdrawing..." : "Withdraw"}
         </button>
         {message ? <p className="team-loading withdraw-status">{message}</p> : null}
       </div>

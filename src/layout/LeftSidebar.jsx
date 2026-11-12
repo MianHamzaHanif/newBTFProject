@@ -473,7 +473,7 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
                   className="nav"
                   onClick={handleNavItemClick}
                 >
-                  <p className="nav-item sub">Withdraw V3</p>
+                  <p className="nav-item sub">Withdraw</p>
                 </NavLink>
 
                 <NavLink
@@ -492,6 +492,14 @@ const LeftSidebar = ({ sidebarOpen, SetSidebarOpen }) => {
                 </NavLink>}
               </div>
             )}
+
+            {canViewMigration && <NavLink
+              to="/migration-data"
+              className="nav"
+              onClick={handleNavItemClick}
+            >
+              <p className="nav-item"><i className="bi bi-arrow-left-right"></i>Migration Data</p>
+            </NavLink>}
           </div>
 
           {/* <div className="nav-dropdown">

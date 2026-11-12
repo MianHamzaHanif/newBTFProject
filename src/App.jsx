@@ -32,6 +32,7 @@ import Alert from "./components/Home/Alert";
 import Profile from "./components/Dashboard/Profile/Proflie";
 import V2ClaimHistory from "./components/Dashboard/Income/V2ClaimHistory";
 import V2ClaimIncome from "./components/Dashboard/Income/V2ClaimIncome";
+import MigrationData from "./components/Dashboard/Migration/MigrationData";
 import RequireV2Registration from "./components/Auth/RequireV2Registration";
 const App = () => {
   const location = useLocation();
@@ -122,6 +123,7 @@ const App = () => {
         {/* DAO Voting also stays available to the migration authority, even
             when that operational wallet is not a registered V2 member. */}
         <Route path="/dao-voting" element={<Withdrawal />} />
+        <Route path="/migration-data" element={<MigrationData />} />
       </Route>
       <Route element={<RequireV2Registration />}>
       <Route element={<DashboardLayout />}>

@@ -10,12 +10,15 @@ const DAO_ABI = [
   "function getProposal(uint256) view returns(address proposer,address target,bytes data,uint256 snapshotTime,uint256 endTime,uint256 eta,uint256 forVotes,uint256 againstVotes,uint256 abstainVotes,bool canceled,bool executed)",
   "function hasVoted(uint256,address) view returns(bool)",
 ];
-const REGISTRY_ABI = ["function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)"];
-// Only the currently approved live proposal should trigger the voting prompt.
-const LIVE_PROPOSAL_IDS = [23n];
+const REGISTRY_ABI = [
+  "function getVotingPowerAt(address user,uint256 snapshotTime) view returns(uint256)",
+  "function getAchievedPowerLevel(address user) view returns(uint256)",
+  "function getAchievedRewardCount(address user) view returns(uint256)",
+];
 
 export default function DaoVotingPrompt() {
   const navigate = useNavigate();
+  const [proposalIds, setProposalIds] = useState([]);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -23,55 +26,75 @@ export default function DaoVotingPrompt() {
 
     const checkVotingEligibility = async () => {
       try {
-        if (!disposed) setVisible(false);
+        if (!disposed) {
+          setVisible(false);
+          setProposalIds([]);
+        }
         const user = await getReadWalletAddress();
         if (!user || !ethers.isAddress(user) || !ethers.isAddress(V2DaoAddress)) return;
 
         const provider = createBscReadProvider();
         const dao = new ethers.Contract(V2DaoAddress, DAO_ABI, provider);
         const registry = new ethers.Contract(ReferralNetworkAddress, REGISTRY_ABI, provider);
-        const block = await provider.getBlock("latest");
+        const [powerLevel, rewardCount, proposalCount, block] = await Promise.all([
+          registry.getAchievedPowerLevel(user),
+          registry.getAchievedRewardCount(user),
+          dao.proposalCount(),
+          provider.getBlock("latest"),
+        ]);
+
+        // Only an active V3 Power/Reward rank can trigger the popup.
+        if (BigInt(powerLevel) === 0n && BigInt(rewardCount) === 0n) return;
+
         const now = BigInt(block?.timestamp ?? 0);
-        const eligibility = await Promise.all(LIVE_PROPOSAL_IDS.map(async (proposalId) => {
+        const count = BigInt(proposalCount);
+        const toRead = Number(count > 50n ? 50n : count);
+        const ids = Array.from({ length: toRead }, (_, index) => count - BigInt(index));
+        const eligible = await Promise.all(ids.map(async (proposalId) => {
           const proposal = await dao.getProposal(proposalId);
           const isOpen = !Boolean(proposal[9]) && !Boolean(proposal[10])
             && BigInt(proposal[5]) === 0n && now <= BigInt(proposal[4]);
-          if (!isOpen) return false;
+          if (!isOpen) return null;
           const [weight, voted] = await Promise.all([
             registry.getVotingPowerAt(user, proposal[3]),
             dao.hasVoted(proposalId, user),
           ]);
-          return BigInt(weight) > 0n && !Boolean(voted);
+          return BigInt(weight) > 0n && !Boolean(voted) ? proposalId : null;
         }));
-        if (!disposed && eligibility.some(Boolean)) setVisible(true);
+
+        const openIds = eligible.filter((proposalId) => proposalId !== null);
+        if (!disposed && openIds.length > 0) {
+          setProposalIds(openIds);
+          setVisible(true);
+        }
       } catch {
-        // The dashboard remains usable when a public RPC temporarily fails.
+        // A temporary public-RPC error must never block the dashboard.
       }
     };
 
     checkVotingEligibility();
-    const handleAccountsChanged = () => { checkVotingEligibility(); };
-    window.ethereum?.on?.("accountsChanged", handleAccountsChanged);
+    window.ethereum?.on?.("accountsChanged", checkVotingEligibility);
+    window.addEventListener("btf:v2-data-changed", checkVotingEligibility);
     return () => {
       disposed = true;
-      window.ethereum?.removeListener?.("accountsChanged", handleAccountsChanged);
+      window.ethereum?.removeListener?.("accountsChanged", checkVotingEligibility);
+      window.removeEventListener("btf:v2-data-changed", checkVotingEligibility);
     };
   }, []);
 
   if (!visible) return null;
 
+  const openProposalId = proposalIds[0];
   return <div className="dao-vote-prompt-backdrop" role="presentation">
     <section className="dao-vote-prompt" role="dialog" aria-modal="true" aria-labelledby="dao-vote-title">
       <button type="button" className="dao-vote-close" onClick={() => setVisible(false)} aria-label="Close">×</button>
       <div className="dao-vote-earth">🌍</div>
-      <h2 id="dao-vote-title">EARTH CALLING 📡</h2>
-      <p>BTF DAO Governance Proposal is LIVE!</p>
-      <p>🗳️ Your Vote • Your Voice • Your Future</p>
-      <p>⏱️ Voting Time: 24 Hours</p>
-      <p>👥 Minimum Quorum: 24%</p>
-      <p>✅ Approval: 51% YES</p>
-      <p className="dao-vote-question">Earth is Calling… Will You Vote? 🌍🚀</p>
-      <button type="button" className="custom-button dao-vote-action" onClick={() => navigate("/dao-voting")}>Vote Now</button>
+      <h2 id="dao-vote-title">DAO Voting Open</h2>
+      <p>Your V3 Power/Reward rank has voting access.</p>
+      <p>Proposal ID: <strong>{openProposalId.toString()}</strong></p>
+      {proposalIds.length > 1 && <p>{proposalIds.length} proposals are available to vote.</p>}
+      <p className="dao-vote-question">Cast your vote before the proposal closes.</p>
+      <button type="button" className="custom-button dao-vote-action" onClick={() => navigate(`/dao-voting?proposalId=${openProposalId.toString()}`)}>Vote Now</button>
     </section>
   </div>;
 }
