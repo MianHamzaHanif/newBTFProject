@@ -276,12 +276,11 @@ const DashboardTop = () => {
         }, 0n);
         // V3 retains the gross amount explicitly, so no fee reconstruction
         // is needed for newly-created withdrawal records.
-        const v3GrossWithdrawn = v3Withdrawals.reduce((total, record) => {
-          const timestamp = BigInt(record?.timestamp ?? record?.[3] ?? 0n);
-          return record && isLegacyV2HistoryVisible(timestamp, legacyV2CutoffTimestamp)
-            ? total + BigInt(record.grossAmount ?? record[0] ?? 0n)
-            : total;
-        }, 0n);
+        // The cutoff belongs only to the old V2 deployment. Every V3
+        // withdrawal is part of the live plan progress, irrespective of date.
+        const v3GrossWithdrawn = v3Withdrawals.reduce((total, record) => (
+          record ? total + BigInt(record.grossAmount ?? record[0] ?? 0n) : total
+        ), 0n);
         const totalWithdrawn = grossFromNet(v1NetWithdrawn)
           + grossFromNet(legacyNetWithdrawn)
           + v3GrossWithdrawn;

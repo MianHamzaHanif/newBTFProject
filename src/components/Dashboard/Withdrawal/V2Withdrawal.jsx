@@ -296,13 +296,12 @@ export default function V2Withdrawal() {
           const entries = await Promise.all(
             Array.from({ length: Number(length) }, (_, index) => ledger.getUserWithdrawHistoryAt(user, index)),
           );
-          const cutoffTimestamp = await getLegacyV2HistoryCutoffTimestamp();
-          return entries.reduce((sum, item) => {
-            const timestamp = BigInt(item.timestamp ?? item[3] ?? 0n);
-            return isLegacyV2HistoryVisible(timestamp, cutoffTimestamp)
-              ? sum + BigInt(item.netAmount ?? item[2] ?? 0n)
-              : sum;
-          }, 0n);
+          // This is the live V3 ledger, so its withdrawals never use the
+          // legacy-V2 visibility cutoff.
+          return entries.reduce(
+            (sum, item) => sum + BigInt(item.netAmount ?? item[2] ?? 0n),
+            0n,
+          );
         })
         .catch(() => 0n),
         legacyLedger.getUserWithdrawHistoryLength(user)
